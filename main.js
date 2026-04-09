@@ -1,6 +1,17 @@
 // ═══════════════════════════════════════════════════════════════
 //  Omnimorf — Electron Main Process
 //  Universal file converter with native binary integration
+//
+//  Copyright (c) 2026 Green Ave Consulting LLC
+//  DBA: Crownarchy Omnithrone — Creator: Blanton Banks II
+//  All Rights Reserved. Proprietary — see LICENSE for terms.
+//
+//  Use of this source code is governed by the Omnimorf Proprietary
+//  Source License. Use of the compiled application is governed by
+//  the End User License Agreement (EULA.md).
+//
+//  On-chain authorship proof: Polygon contract
+//  0x72dB28F53B97d7BBd19beA25856Bc7B6D9fFc7Bc (2026-04-05)
 // ═══════════════════════════════════════════════════════════════
 
 const { app, BrowserWindow, Menu, dialog, ipcMain, shell } = require('electron');

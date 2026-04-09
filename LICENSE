@@ -1,0 +1,137 @@
+OMNIMORF PROPRIETARY SOURCE LICENSE
+Copyright (c) 2026 Green Ave Consulting LLC
+DBA: Crownarchy Omnithrone
+Creator: Blanton Banks II
+All Rights Reserved.
+
+================================================================================
+NOTICE OF PROPRIETARY RIGHTS
+================================================================================
+
+This source code repository ("Source") is made publicly visible for the
+purposes of security auditing, privacy verification, and transparency only.
+
+PUBLIC VISIBILITY OF THIS SOURCE CODE DOES NOT GRANT ANY LICENSE, RIGHT,
+OR PERMISSION TO USE, COPY, MODIFY, MERGE, PUBLISH, DISTRIBUTE, SUBLICENSE,
+SELL, HOST, FORK, REPACKAGE, OR CREATE DERIVATIVE WORKS OF THIS SOURCE,
+IN WHOLE OR IN PART, FOR ANY PURPOSE WHATSOEVER.
+
+All rights under United States copyright law, international copyright
+treaties (including the Berne Convention), trademark law, and trade secret
+law are expressly reserved by Green Ave Consulting LLC and Blanton Banks II.
+
+================================================================================
+WHAT YOU MAY DO (PERMITTED)
+================================================================================
+
+1. Read this source code for personal educational purposes.
+2. Audit this source code to verify security and privacy claims made by
+   the Omnimorf product.
+3. Report vulnerabilities or bugs to the copyright holder.
+4. Link to this repository for reference purposes.
+5. Discuss, review, or comment on this source code publicly, provided such
+   discussion does not include verbatim code reproduction beyond what
+   qualifies as fair use under 17 U.S.C. § 107.
+
+================================================================================
+WHAT YOU MAY NOT DO (PROHIBITED)
+================================================================================
+
+1. You may NOT copy, reproduce, or redistribute any portion of this source
+   code, in whole or in part, in any form, whether modified or unmodified.
+2. You may NOT compile, build, package, or distribute executables derived
+   from this source code.
+3. You may NOT host, mirror, or republish this source code on any other
+   platform, service, or repository.
+4. You may NOT create derivative works, forks, or adaptations based on
+   this source code.
+5. You may NOT incorporate any portion of this source code into any other
+   software, product, or service, whether commercial or non-commercial.
+6. You may NOT reverse engineer the packaged Omnimorf application except
+   to the extent such reverse engineering is expressly permitted by
+   applicable law notwithstanding this prohibition.
+7. You may NOT use the "Omnimorf" name, logo, wordmark, or any confusingly
+   similar mark in connection with any software, service, or product
+   without prior written permission.
+8. You may NOT remove, alter, or obscure any copyright notice, trademark
+   notice, or proprietary legend contained in this source code.
+9. You may NOT use this source code or any portion thereof to train,
+   fine-tune, or evaluate any machine learning model, large language
+   model, or artificial intelligence system without prior written
+   permission from the copyright holder.
+
+================================================================================
+TRADEMARKS
+================================================================================
+
+"OMNIMORF", the Omnimorf wordmark, and the Omnimorf logo (including all
+variants — "The Morph Core" dual-blade mark, the animated morph sequence,
+and all color gradient applications thereof) are trademarks of
+Green Ave Consulting LLC. Unauthorized use is strictly prohibited.
+
+"CROWNARCHY OMNITHRONE", "CROWNARCHY", and "OMNITHRONE" are trademarks of
+Green Ave Consulting LLC. Unauthorized use is strictly prohibited.
+
+================================================================================
+ON-CHAIN PROOF OF AUTHORSHIP
+================================================================================
+
+Creation of this work is cryptographically timestamped and recorded on the
+Polygon blockchain (Chain ID 137) at the following immutable address:
+
+    Contract: 0x72dB28F53B97d7BBd19beA25856Bc7B6D9fFc7Bc
+    Network:  Polygon PoS (Ethereum Layer 2)
+    Records:  26 Omnimorf subsystem components
+    Deployed: 2026-04-05
+
+Any dispute regarding authorship, date of creation, or priority of
+invention may be resolved by reference to this on-chain record, which
+predates any subsequent claim of authorship.
+
+================================================================================
+USE OF THE COMPILED BINARY
+================================================================================
+
+Use of the compiled, packaged Omnimorf application (distributed as
+installers for Windows, macOS, and Linux) is governed by a separate
+End User License Agreement (EULA.md) included with each installer and
+presented to the user during installation. The terms of that EULA apply
+in addition to, and not in place of, this proprietary source license.
+
+================================================================================
+WARRANTY DISCLAIMER
+================================================================================
+
+THIS SOURCE CODE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,
+INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY
+AND FITNESS FOR A PARTICULAR PURPOSE, ARE DISCLAIMED. IN NO EVENT SHALL
+THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+THIS SOURCE CODE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+================================================================================
+GOVERNING LAW
+================================================================================
+
+This license is governed by the laws of the United States of America and
+the state in which Green Ave Consulting LLC is registered, without regard
+to conflict of law principles. Any dispute arising from this license shall
+be resolved exclusively in the state or federal courts of that jurisdiction.
+
+================================================================================
+CONTACT
+================================================================================
+
+For licensing inquiries, commercial use permission, or permission to use
+the source code in any manner not expressly permitted above, contact:
+
+    Green Ave Consulting LLC
+    gacllcmo@outlook.com
+
+================================================================================
+END OF LICENSE
+================================================================================
