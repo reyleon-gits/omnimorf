@@ -1,0 +1,222 @@
+name: Build & Release Omnimorf
+
+# Triggers:
+#  - Push a tag like v1.0.0 → full 3-platform build → publish GitHub Release
+#  - Manual dispatch → test build, artifacts only, no release
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag for test build (not published)'
+        required: false
+        default: 'v0.0.0-test'
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  # ══════════════════════════════════════════════════════════════
+  #  WINDOWS BUILD
+  # ══════════════════════════════════════════════════════════════
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Download FFmpeg (Windows static)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path binaries/win | Out-Null
+          Invoke-WebRequest -Uri "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip" -OutFile ffmpeg.zip
+          Expand-Archive -Path ffmpeg.zip -DestinationPath ffmpeg-tmp -Force
+          Copy-Item -Path "ffmpeg-tmp/ffmpeg-master-latest-win64-gpl/bin/ffmpeg.exe" -Destination "binaries/win/ffmpeg.exe"
+          Remove-Item -Recurse -Force ffmpeg-tmp, ffmpeg.zip
+
+      - name: Download ImageMagick (Windows portable)
+        shell: pwsh
+        run: |
+          $url = "https://imagemagick.org/archive/binaries/ImageMagick-7.1.1-47-portable-Q16-x64.zip"
+          Invoke-WebRequest -Uri $url -OutFile magick.zip
+          Expand-Archive -Path magick.zip -DestinationPath magick-tmp -Force
+          $mg = Get-ChildItem -Path magick-tmp -Recurse -Filter "magick.exe" | Select-Object -First 1
+          Copy-Item -Path $mg.FullName -Destination "binaries/win/magick.exe"
+          Remove-Item -Recurse -Force magick-tmp, magick.zip
+
+      - name: Build Windows (NSIS installer)
+        run: npm run build:win
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Stable filenames
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist/release | Out-Null
+          Get-ChildItem -Path dist -Filter "*Setup*.exe" | ForEach-Object { Copy-Item $_.FullName "dist/release/Omnimorf-Setup-Windows.exe" -Force }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: omnimorf-windows
+          path: dist/release/*.exe
+
+  # ══════════════════════════════════════════════════════════════
+  #  MACOS BUILD
+  # ══════════════════════════════════════════════════════════════
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Download FFmpeg (macOS arm64)
+        run: |
+          mkdir -p binaries/mac
+          curl -L -o ffmpeg.zip "https://www.osxexperts.net/ffmpeg71arm.zip"
+          unzip -q ffmpeg.zip -d ffmpeg-tmp
+          cp ffmpeg-tmp/ffmpeg binaries/mac/ffmpeg
+          chmod +x binaries/mac/ffmpeg
+          rm -rf ffmpeg-tmp ffmpeg.zip
+
+      - name: Install ImageMagick (macOS via Homebrew)
+        run: |
+          brew install imagemagick
+          cp $(which magick) binaries/mac/magick
+          chmod +x binaries/mac/magick
+
+      - name: Ad-hoc sign bundled binaries
+        run: |
+          codesign --force --deep --sign - binaries/mac/ffmpeg || true
+          codesign --force --deep --sign - binaries/mac/magick || true
+
+      - name: Build macOS (DMG — x64 + arm64)
+        run: npm run build:mac
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Ad-hoc sign the final .app
+        run: |
+          find dist -name "*.app" -type d -exec codesign --force --deep --sign - {} \; || true
+
+      - name: Stable filenames
+        run: |
+          mkdir -p dist/release
+          for f in dist/*.dmg; do
+            if [[ "$f" == *"arm64"* ]]; then cp "$f" "dist/release/Omnimorf-macOS-AppleSilicon.dmg"
+            else cp "$f" "dist/release/Omnimorf-macOS-Intel.dmg"
+            fi
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: omnimorf-macos
+          path: dist/release/*.dmg
+
+  # ══════════════════════════════════════════════════════════════
+  #  LINUX BUILD
+  # ══════════════════════════════════════════════════════════════
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Download FFmpeg (Linux x64 static)
+        run: |
+          mkdir -p binaries/linux
+          curl -L -o ffmpeg.tar.xz "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz"
+          tar -xf ffmpeg.tar.xz
+          cp ffmpeg-*-amd64-static/ffmpeg binaries/linux/ffmpeg
+          chmod +x binaries/linux/ffmpeg
+          rm -rf ffmpeg-*-amd64-static ffmpeg.tar.xz
+
+      - name: Install ImageMagick (Linux via apt)
+        run: |
+          sudo apt-get update && sudo apt-get install -y imagemagick
+          cp $(which magick 2>/dev/null || which convert) binaries/linux/magick
+          chmod +x binaries/linux/magick
+
+      - name: Build Linux (AppImage + .deb)
+        run: npm run build:linux
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Stable filenames
+        run: |
+          mkdir -p dist/release
+          for f in dist/*.AppImage; do cp "$f" "dist/release/Omnimorf-Linux.AppImage"; done
+          for f in dist/*.deb; do cp "$f" "dist/release/Omnimorf-Linux.deb"; done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: omnimorf-linux
+          path: dist/release/*
+
+  # ══════════════════════════════════════════════════════════════
+  #  PUBLISH RELEASE (only on v*.*.* tag push)
+  # ══════════════════════════════════════════════════════════════
+  publish:
+    needs: [build-windows, build-macos, build-linux]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten artifacts
+        run: |
+          mkdir -p release-assets
+          find artifacts -type f \( -name "*.exe" -o -name "*.dmg" -o -name "*.AppImage" -o -name "*.deb" \) -exec cp {} release-assets/ \;
+          ls -la release-assets
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Omnimorf ${{ github.ref_name }}
+          body: |
+            # Omnimorf ${{ github.ref_name }}
+
+            Universal file converter. Zero uploads. One price. Forever.
+
+            ## Downloads
+            - **Windows**: `Omnimorf-Setup-Windows.exe`
+            - **macOS (Apple Silicon)**: `Omnimorf-macOS-AppleSilicon.dmg`
+            - **macOS (Intel)**: `Omnimorf-macOS-Intel.dmg`
+            - **Linux (AppImage)**: `Omnimorf-Linux.AppImage`
+            - **Linux (Debian/Ubuntu)**: `Omnimorf-Linux.deb`
+
+            First time installing? See https://omnimorf.com/#install
+          files: release-assets/*
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

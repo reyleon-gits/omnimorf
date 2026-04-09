@@ -1,0 +1,94 @@
+{
+  "name": "omnimorf",
+  "version": "1.0.0",
+  "description": "Universal file converter — 1000+ formats, 100% local, offline, cross-platform",
+  "main": "main.js",
+  "author": "Blanton Banks II",
+  "license": "UNLICENSED",
+  "scripts": {
+    "start":      "electron .",
+    "pack":       "electron-builder --dir",
+    "dist":       "electron-builder",
+    "dist:win":   "electron-builder --win",
+    "dist:mac":   "electron-builder --mac",
+    "dist:linux": "electron-builder --linux",
+    "build:win":  "electron-builder --win --publish never",
+    "build:mac":  "electron-builder --mac --publish never",
+    "build:linux":"electron-builder --linux --publish never"
+  },
+  "devDependencies": {
+    "electron":          "^28.0.0",
+    "electron-builder":  "^24.0.0"
+  },
+  "build": {
+    "appId":       "com.omnimorf.app",
+    "productName": "Omnimorf",
+    "copyright":   "Copyright © 2026 Blanton Banks II",
+    "icon":        "assets/icon",
+    "asar":        true,
+    "asarUnpack":  ["binaries/**"],
+    "electronFuses": {
+      "runAsNode":                             false,
+      "enableCookieEncryption":                true,
+      "enableNodeOptionsEnvironmentVariable":  false,
+      "enableNodeCliInspectArguments":         false,
+      "enableEmbeddedAsarIntegrityValidation": true,
+      "onlyLoadAppFromAsar":                   true
+    },
+    "extraResources": [
+      {
+        "from": "binaries/${os}",
+        "to": "binaries",
+        "filter": ["**/*"]
+      }
+    ],
+    "files": [
+      "index.html",
+      "heic2any.min.js",
+      "jszip.min.js",
+      "main.js",
+      "preload.js",
+      "assets/**"
+    ],
+    "fileAssociations": [
+      { "ext": "heic", "name": "HEIC Image",  "description": "HEIC Image File", "role": "Editor" },
+      { "ext": "heif", "name": "HEIF Image",  "description": "HEIF Image File", "role": "Editor" },
+      { "ext": "png",  "name": "PNG Image",   "description": "PNG Image File",  "role": "Editor" },
+      { "ext": "jpg",  "name": "JPEG Image",  "description": "JPEG Image File", "role": "Editor" },
+      { "ext": "webp", "name": "WebP Image",  "description": "WebP Image File", "role": "Editor" },
+      { "ext": "mp4",  "name": "MP4 Video",   "description": "MP4 Video File",  "role": "Editor" },
+      { "ext": "mov",  "name": "MOV Video",   "description": "MOV Video File",  "role": "Editor" },
+      { "ext": "mp3",  "name": "MP3 Audio",   "description": "MP3 Audio File",  "role": "Editor" },
+      { "ext": "wav",  "name": "WAV Audio",   "description": "WAV Audio File",  "role": "Editor" },
+      { "ext": "flac", "name": "FLAC Audio",  "description": "FLAC Audio File", "role": "Editor" }
+    ],
+    "win": {
+      "target": [
+        { "target": "nsis",     "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] }
+      ]
+    },
+    "nsis": {
+      "oneClick":        false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName":    "Omnimorf"
+    },
+    "mac": {
+      "target": [{ "target": "dmg", "arch": ["x64", "arm64"] }],
+      "category": "public.app-category.utilities"
+    },
+    "dmg": {
+      "title": "Omnimorf ${version}"
+    },
+    "linux": {
+      "target":   ["AppImage", "deb"],
+      "category": "Utility",
+      "synopsis": "Universal file converter — every format, zero uploads"
+    },
+    "deb": {
+      "depends": ["libgtk-3-0", "libnotify4", "libnss3", "libxss1", "libxtst6"]
+    }
+  }
+}

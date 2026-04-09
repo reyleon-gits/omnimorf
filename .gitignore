@@ -1,0 +1,22 @@
+node_modules/
+dist/
+out/
+binaries/
+.DS_Store
+Thumbs.db
+*.log
+
+# Secrets — never commit
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+*credentials*.json
+
+# Local working documents (not part of the product)
+*.docx
+~$*
+OMNIMORF*.docx
+"the overview"*
