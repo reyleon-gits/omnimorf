@@ -2,8 +2,8 @@
 //  Omnimorf — Electron Main Process
 //  Universal file converter with native binary integration
 //
-//  Copyright (c) 2026 Green Ave Consulting LLC
-//  DBA: Crownarchy Omnithrone — Creator: Blanton Banks II
+//  Copyright (c) 2026 Green Aventurine Consulting, LLC
+//  Creator: Blanton Banks II
 //  All Rights Reserved. Proprietary — see LICENSE for terms.
 //
 //  Use of this source code is governed by the Omnimorf Proprietary

@@ -2,14 +2,14 @@
 
 **Effective Date:** 2026-04-08
 **Product:** Omnimorf — Universal File Converter
-**Licensor:** Green Ave Consulting LLC (DBA: Crownarchy Omnithrone)
+**Licensor:** Green Aventurine Consulting, LLC
 **Contact:** gacllcmo@outlook.com
 
 ---
 
 ## IMPORTANT — READ CAREFULLY
 
-This End User License Agreement ("Agreement") is a legal contract between you ("User" or "You") and **Green Ave Consulting LLC** ("Licensor", "We", "Us", or "Our"), the creator and owner of the Omnimorf software application ("Software").
+This End User License Agreement ("Agreement") is a legal contract between you ("User" or "You") and **Green Aventurine Consulting, LLC** ("Licensor", "We", "Us", or "Our"), the creator and owner of the Omnimorf software application ("Software").
 
 **BY INSTALLING, COPYING, ACCESSING, OR OTHERWISE USING THE SOFTWARE, YOU AGREE TO BE BOUND BY THE TERMS OF THIS AGREEMENT.** If You do not agree to these terms, do not install, copy, or use the Software, and request a full refund within the refund window described in Section 10.
 
@@ -34,7 +34,7 @@ This license is granted solely for Your personal use (Personal, Pro, Lifetime ti
 
 The Software is **licensed, not sold**. Licensor retains all right, title, and interest in and to the Software, including all intellectual property rights therein. This Agreement does not transfer to You any ownership of the Software or any intellectual property rights.
 
-All trademarks, including "OMNIMORF", the Omnimorf logo, and associated brand assets, are the exclusive property of Green Ave Consulting LLC. You may not use these trademarks without Licensor's prior written consent.
+All trademarks, including "OMNIMORF", the Omnimorf logo, and associated brand assets, are the exclusive property of Green Aventurine Consulting, LLC. You may not use these trademarks without Licensor's prior written consent.
 
 The creation and authorship of the Software is cryptographically proven via an immutable on-chain record at Polygon contract address `0x72dB28F53B97d7BBd19beA25856Bc7B6D9fFc7Bc`, registered on 2026-04-05.
 
@@ -129,7 +129,7 @@ You agree to comply with all applicable export laws and regulations, including t
 
 ## 13. GOVERNING LAW AND JURISDICTION
 
-This Agreement shall be governed by and construed in accordance with the laws of the United States of America and the state in which Green Ave Consulting LLC is registered, without regard to its conflict of law principles. You agree that any legal action or proceeding arising under or relating to this Agreement shall be brought exclusively in the state or federal courts located in that jurisdiction, and You consent to the personal jurisdiction of such courts.
+This Agreement shall be governed by and construed in accordance with the laws of the United States of America and the state in which Green Aventurine Consulting, LLC is registered, without regard to its conflict of law principles. You agree that any legal action or proceeding arising under or relating to this Agreement shall be brought exclusively in the state or federal courts located in that jurisdiction, and You consent to the personal jurisdiction of such courts.
 
 ## 14. ENTIRE AGREEMENT
 
@@ -147,7 +147,7 @@ Licensor reserves the right to modify this Agreement at any time. Material chang
 
 For questions regarding this Agreement, licensing inquiries, refund requests, or any other matters, contact:
 
-**Green Ave Consulting LLC**
+**Green Aventurine Consulting, LLC**
 Email: gacllcmo@outlook.com
 Product: Omnimorf (https://omnimorf.com)
 
@@ -155,4 +155,4 @@ Product: Omnimorf (https://omnimorf.com)
 
 **BY INSTALLING OR USING THE SOFTWARE, YOU ACKNOWLEDGE THAT YOU HAVE READ THIS AGREEMENT, UNDERSTAND IT, AND AGREE TO BE BOUND BY ITS TERMS.**
 
-© 2026 Green Ave Consulting LLC. All Rights Reserved.
+© 2026 Green Aventurine Consulting, LLC. All Rights Reserved.
