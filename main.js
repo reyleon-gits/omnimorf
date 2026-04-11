@@ -424,7 +424,10 @@ function imageMagickConvert(input, output, quality) {
     });
 }
 
-// ── OCR Engine (Tesseract.js) ────────────────────────────────
+// ── OCR Engine (Tesseract.js — Maximum Precision) ───────────
+// Uses tessdata_best LSTM model for highest accuracy on numbers,
+// symbols, and mixed-format documents. Worker is lazy-initialized,
+// reused across requests, and terminated on app quit.
 let ocrWorker = null;
 
 async function getOcrWorker() {
@@ -433,88 +436,179 @@ async function getOcrWorker() {
         const cachePath = path.join(app.getPath('userData'), 'tessdata-cache');
         if (!fs.existsSync(cachePath)) fs.mkdirSync(cachePath, { recursive: true });
 
-        ocrWorker = await Tesseract.createWorker('eng', 1, {
+        // OEM.DEFAULT (3) = best available engine (LSTM preferred, legacy fallback)
+        ocrWorker = await Tesseract.createWorker('eng', Tesseract.OEM.DEFAULT, {
             langPath: fs.existsSync(tessdataPath) ? tessdataPath : cachePath,
             cachePath: cachePath,
+        });
+
+        // Maximum fidelity settings
+        await ocrWorker.setParameters({
+            preserve_interword_spaces: '1',   // Keep exact spacing between words
+            tessedit_char_whitelist: '',       // Empty = recognize ALL characters (no restriction)
+            tessedit_pageseg_mode: '3',        // Fully automatic page segmentation
         });
     }
     return ocrWorker;
 }
 
 async function ocrConvert(inputPath, outputPath, targetFormat) {
-    const worker = await getOcrWorker();
-    const { data } = await worker.recognize(inputPath);
-    const text = data.text || '';
+    // For non-PNG/JPG sources, convert to PNG first (Tesseract works best with PNG/JPG)
+    let ocrInputPath = inputPath;
+    const ext = path.extname(inputPath).toLowerCase().replace('.', '');
+    const needsPreConvert = !['png', 'jpg', 'jpeg', 'bmp', 'tiff', 'tif', 'webp'].includes(ext);
+    if (needsPreConvert) {
+        ocrInputPath = inputPath + '.ocr-prep.png';
+        await imageMagickConvert(inputPath, ocrInputPath, 1.0);
+    }
 
-    if (targetFormat === 'txt') {
-        fs.writeFileSync(outputPath, text, 'utf8');
-    } else if (targetFormat === 'pdf') {
-        const pdfBytes = await generatePdfFromOcr(text, inputPath);
-        fs.writeFileSync(outputPath, pdfBytes);
-    } else if (targetFormat === 'docx') {
-        const docxBytes = await generateDocxFromOcr(text);
-        fs.writeFileSync(outputPath, docxBytes);
-    } else {
-        throw new Error('Unsupported OCR output format: ' + targetFormat);
+    const worker = await getOcrWorker();
+    const { data } = await worker.recognize(ocrInputPath);
+
+    try {
+        if (targetFormat === 'txt') {
+            // Preserve exact line breaks, spacing, and paragraph structure
+            fs.writeFileSync(outputPath, data.text || '', 'utf8');
+        } else if (targetFormat === 'pdf') {
+            const pdfBytes = await generateSearchablePdf(data, ocrInputPath);
+            fs.writeFileSync(outputPath, pdfBytes);
+        } else if (targetFormat === 'docx') {
+            const docxBytes = await generatePrecisionDocx(data);
+            fs.writeFileSync(outputPath, docxBytes);
+        } else {
+            throw new Error('Unsupported OCR output format: ' + targetFormat);
+        }
+    } finally {
+        if (needsPreConvert) { try { fs.unlinkSync(ocrInputPath); } catch {} }
     }
 }
 
-async function generatePdfFromOcr(text, imagePath) {
+// ── Searchable PDF: original image + invisible text overlay ──
+// The gold standard for OCR PDFs. The image is visible, the OCR text
+// is positioned at exact bounding box coordinates as an invisible layer.
+// Result: visually identical to the original, fully searchable/selectable.
+async function generateSearchablePdf(ocrData, imagePath) {
     const doc = await PDFDocument.create();
-    const fontSize = 12;
-    const margin = 50;
-    const lineHeight = fontSize * 1.5;
-    const maxWidth = 612 - (margin * 2); // Letter width in points
+    const imageBytes = fs.readFileSync(imagePath);
+    const ext = path.extname(imagePath).toLowerCase();
 
-    const font = await doc.embedFont(StandardFonts.Helvetica);
-
-    // Word-wrap and paginate
-    const rawLines = text.split('\n');
-    const wrappedLines = [];
-    for (const raw of rawLines) {
-        if (raw.trim() === '') { wrappedLines.push(''); continue; }
-        const words = raw.split(/\s+/);
-        let line = '';
-        for (const word of words) {
-            const test = line ? line + ' ' + word : word;
-            if (font.widthOfTextAtSize(test, fontSize) > maxWidth && line) {
-                wrappedLines.push(line);
-                line = word;
-            } else {
-                line = test;
-            }
-        }
-        if (line) wrappedLines.push(line);
+    // Embed image (convert to PNG via ImageMagick if format not supported by pdf-lib)
+    let image;
+    if (ext === '.png') {
+        image = await doc.embedPng(imageBytes);
+    } else if (['.jpg', '.jpeg'].includes(ext)) {
+        image = await doc.embedJpg(imageBytes);
+    } else {
+        // Convert to PNG for embedding
+        const tmpPng = imagePath + '.embed.png';
+        await imageMagickConvert(imagePath, tmpPng, 1.0);
+        const pngBytes = fs.readFileSync(tmpPng);
+        image = await doc.embedPng(pngBytes);
+        try { fs.unlinkSync(tmpPng); } catch {}
     }
 
-    let page = doc.addPage([612, 792]); // Letter size
-    let y = 792 - margin;
+    const imgW = image.width;
+    const imgH = image.height;
 
-    for (const line of wrappedLines) {
-        if (y < margin + lineHeight) {
-            page = doc.addPage([612, 792]);
-            y = 792 - margin;
-        }
-        if (line.trim()) {
-            page.drawText(line, {
-                x: margin, y, size: fontSize, font, color: rgb(0, 0, 0),
+    // Scale to fit within Letter bounds while preserving aspect ratio
+    const MAX_W = 612;
+    const MAX_H = 792;
+    const scale = Math.min(MAX_W / imgW, MAX_H / imgH, 1);
+    const pageW = imgW * scale;
+    const pageH = imgH * scale;
+
+    const page = doc.addPage([pageW, pageH]);
+
+    // Layer 1: Original image as background (visible)
+    page.drawImage(image, { x: 0, y: 0, width: pageW, height: pageH });
+
+    // Layer 2: OCR text overlay (invisible — for search/select/copy)
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    const lines = ocrData.lines || [];
+
+    for (const line of lines) {
+        const words = line.words || [];
+        for (const word of words) {
+            const txt = (word.text || '').trim();
+            if (!txt) continue;
+
+            const bbox = word.bbox;
+            if (!bbox) continue;
+
+            // Scale bounding box from image coords to page coords
+            const x = bbox.x0 * scale;
+            const wordH = (bbox.y1 - bbox.y0) * scale;
+            // PDF y-axis is bottom-up; Tesseract bbox y-axis is top-down
+            const y = pageH - (bbox.y1 * scale);
+
+            // Font size derived from word height for precise positioning
+            const fontSize = Math.max(Math.round(wordH * 0.85), 4);
+
+            page.drawText(txt, {
+                x: x,
+                y: y,
+                size: fontSize,
+                font: font,
+                color: rgb(0, 0, 0),
+                opacity: 0.001, // Near-invisible: searchable/selectable but not visually disruptive
             });
         }
-        y -= lineHeight;
     }
 
     return Buffer.from(await doc.save());
 }
 
-async function generateDocxFromOcr(text) {
-    const paragraphs = text.split('\n').map(line =>
-        new Paragraph({
-            children: [new TextRun({ text: line, size: 24 })], // 12pt = 24 half-points
-        })
-    );
+// ── Precision DOCX: preserves paragraph + line structure ─────
+// Each Tesseract paragraph becomes a DOCX paragraph.
+// Each line within a paragraph becomes a line break (soft return).
+// Preserves the exact visual structure of the original document.
+async function generatePrecisionDocx(ocrData) {
+    const paragraphs = [];
+    const blocks = ocrData.paragraphs || [];
+
+    if (blocks.length > 0) {
+        // Use Tesseract's paragraph/line detection for structure-aware output
+        for (const para of blocks) {
+            const lines = para.lines || [];
+            const children = [];
+
+            for (let i = 0; i < lines.length; i++) {
+                const lineText = (lines[i].text || '').trimEnd();
+                if (i > 0) children.push(new TextRun({ break: 1 })); // Soft line break
+                children.push(new TextRun({ text: lineText, size: 24, font: 'Calibri' }));
+            }
+
+            paragraphs.push(new Paragraph({
+                children: children,
+                spacing: { after: 120 }, // 6pt paragraph spacing
+            }));
+        }
+    } else {
+        // Fallback: split on double newlines for paragraphs, single for lines
+        const rawParagraphs = (ocrData.text || '').split(/\n\s*\n/);
+        for (const rawPara of rawParagraphs) {
+            const lines = rawPara.split('\n');
+            const children = [];
+            for (let i = 0; i < lines.length; i++) {
+                if (i > 0) children.push(new TextRun({ break: 1 }));
+                children.push(new TextRun({ text: lines[i].trimEnd(), size: 24, font: 'Calibri' }));
+            }
+            paragraphs.push(new Paragraph({
+                children: children,
+                spacing: { after: 120 },
+            }));
+        }
+    }
 
     const doc = new Document({
-        sections: [{ children: paragraphs }],
+        sections: [{
+            properties: {
+                page: {
+                    margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 }, // 1 inch = 1440 twips
+                },
+            },
+            children: paragraphs,
+        }],
     });
 
     return await Packer.toBuffer(doc);
