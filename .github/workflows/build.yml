@@ -42,16 +42,28 @@ jobs:
           Expand-Archive -Path ffmpeg.zip -DestinationPath ffmpeg-tmp -Force
           Copy-Item -Path "ffmpeg-tmp/ffmpeg-master-latest-win64-gpl/bin/ffmpeg.exe" -Destination "binaries/win/ffmpeg.exe"
           Remove-Item -Recurse -Force ffmpeg-tmp, ffmpeg.zip
+          Write-Host "FFmpeg copied to binaries/win/"
 
-      - name: Download ImageMagick (Windows portable)
+      - name: Download ImageMagick 7 (Windows portable)
         shell: pwsh
         run: |
-          $url = "https://imagemagick.org/archive/binaries/ImageMagick-7.1.1-47-portable-Q16-x64.zip"
-          Invoke-WebRequest -Uri $url -OutFile magick.zip
+          # Query GitHub API for latest release — never hardcode a version URL
+          $headers = @{ 'User-Agent' = 'Omnimorf-CI' }
+          $release = Invoke-RestMethod -Uri "https://api.github.com/repos/ImageMagick/ImageMagick/releases/latest" -Headers $headers
+          $asset = $release.assets | Where-Object { $_.name -match "ImageMagick-.*portable-Q16-x64\.zip$" } | Select-Object -First 1
+          if (-not $asset) {
+            # Fallback: try HDRI variant
+            $asset = $release.assets | Where-Object { $_.name -match "ImageMagick-.*portable-Q16-HDRI-x64\.zip$" } | Select-Object -First 1
+          }
+          if (-not $asset) { throw "No portable ImageMagick ZIP found in latest GitHub release" }
+          Write-Host "Downloading: $($asset.name)"
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile magick.zip
           Expand-Archive -Path magick.zip -DestinationPath magick-tmp -Force
           $mg = Get-ChildItem -Path magick-tmp -Recurse -Filter "magick.exe" | Select-Object -First 1
+          if (-not $mg) { throw "magick.exe not found in extracted archive" }
           Copy-Item -Path $mg.FullName -Destination "binaries/win/magick.exe"
           Remove-Item -Recurse -Force magick-tmp, magick.zip
+          Write-Host "ImageMagick magick.exe copied to binaries/win/"
 
       - name: Build Windows (NSIS installer)
         run: npm run build:win
@@ -85,14 +97,20 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
-      - name: Download FFmpeg (macOS arm64)
+      - name: Download FFmpeg (macOS static)
         run: |
           mkdir -p binaries/mac
-          curl -L -o ffmpeg.zip "https://www.osxexperts.net/ffmpeg71arm.zip"
+          # evermeet.cx — standard source for macOS static FFmpeg builds (auto-latest)
+          curl -L -o ffmpeg.zip "https://evermeet.cx/ffmpeg/getrelease/zip" || {
+            echo "evermeet.cx unavailable — falling back to osxexperts.net"
+            curl -L -o ffmpeg.zip "https://www.osxexperts.net/ffmpeg71arm.zip"
+          }
           unzip -q ffmpeg.zip -d ffmpeg-tmp
-          cp ffmpeg-tmp/ffmpeg binaries/mac/ffmpeg
+          # Handle both flat and nested archive structures
+          find ffmpeg-tmp -name "ffmpeg" -type f | head -1 | xargs -I{} cp {} binaries/mac/ffmpeg
           chmod +x binaries/mac/ffmpeg
           rm -rf ffmpeg-tmp ffmpeg.zip
+          echo "FFmpeg copied to binaries/mac/"
 
       - name: Install ImageMagick (macOS via Homebrew)
         run: |
@@ -104,6 +122,24 @@ jobs:
         run: |
           codesign --force --deep --sign - binaries/mac/ffmpeg || true
           codesign --force --deep --sign - binaries/mac/magick || true
+
+      - name: Generate icon.icns
+        run: |
+          # electron-builder requires assets/icon.icns for macOS — generate from icon.png
+          mkdir -p icon.iconset
+          sips -z   16   16 assets/icon.png --out icon.iconset/icon_16x16.png
+          sips -z   32   32 assets/icon.png --out icon.iconset/icon_16x16@2x.png
+          sips -z   32   32 assets/icon.png --out icon.iconset/icon_32x32.png
+          sips -z   64   64 assets/icon.png --out icon.iconset/icon_32x32@2x.png
+          sips -z  128  128 assets/icon.png --out icon.iconset/icon_128x128.png
+          sips -z  256  256 assets/icon.png --out icon.iconset/icon_128x128@2x.png
+          sips -z  256  256 assets/icon.png --out icon.iconset/icon_256x256.png
+          sips -z  512  512 assets/icon.png --out icon.iconset/icon_256x256@2x.png
+          sips -z  512  512 assets/icon.png --out icon.iconset/icon_512x512.png
+          sips -z 1024 1024 assets/icon.png --out icon.iconset/icon_512x512@2x.png
+          iconutil -c icns icon.iconset -o assets/icon.icns
+          rm -rf icon.iconset
+          echo "Generated assets/icon.icns"
 
       - name: Build macOS (DMG — x64 + arm64)
         run: npm run build:mac
@@ -145,6 +181,11 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfuse2
+
       - name: Download FFmpeg (Linux x64 static)
         run: |
           mkdir -p binaries/linux
@@ -154,11 +195,41 @@ jobs:
           chmod +x binaries/linux/ffmpeg
           rm -rf ffmpeg-*-amd64-static ffmpeg.tar.xz
 
-      - name: Install ImageMagick (Linux via apt)
+      - name: Download ImageMagick 7 (Linux x64)
         run: |
-          sudo apt-get update && sudo apt-get install -y imagemagick
-          cp $(which magick 2>/dev/null || which convert) binaries/linux/magick
+          mkdir -p binaries/linux
+          # apt gives v6 (convert only) — Omnimorf needs v7 (magick binary)
+          # Download official AppImage from GitHub, extract static magick binary
+          RELEASE_JSON=$(curl -s "https://api.github.com/repos/ImageMagick/ImageMagick/releases/latest")
+          APPIMAGE_URL=$(echo "$RELEASE_JSON" | grep -oP '"browser_download_url":\s*"\K[^"]*ImageMagick-[^"]*gcc-x86_64\.AppImage(?=")' | head -1)
+          if [ -z "$APPIMAGE_URL" ]; then
+            # Broader fallback: any x86_64 AppImage
+            APPIMAGE_URL=$(echo "$RELEASE_JSON" | grep -oP '"browser_download_url":\s*"\K[^"]*x86_64\.AppImage(?=")' | head -1)
+          fi
+          if [ -n "$APPIMAGE_URL" ]; then
+            echo "Downloading AppImage: $APPIMAGE_URL"
+            curl -L -o magick.AppImage "$APPIMAGE_URL"
+            chmod +x magick.AppImage
+            # --appimage-extract works without FUSE
+            ./magick.AppImage --appimage-extract > /dev/null 2>&1
+            cp squashfs-root/usr/bin/magick binaries/linux/magick
+            rm -rf squashfs-root magick.AppImage
+          else
+            echo "No AppImage found — building ImageMagick 7 from source"
+            sudo apt-get install -y build-essential pkg-config libjpeg-dev libpng-dev libtiff-dev libwebp-dev
+            curl -L -o magick.tar.gz "https://imagemagick.org/archive/ImageMagick.tar.gz"
+            tar -xf magick.tar.gz
+            cd ImageMagick-*
+            ./configure --prefix=/tmp/im7 --disable-shared --enable-static --with-modules=no --without-x --without-perl
+            make -j$(nproc)
+            make install
+            cd ..
+            cp /tmp/im7/bin/magick binaries/linux/magick
+            rm -rf ImageMagick-* magick.tar.gz /tmp/im7
+          fi
           chmod +x binaries/linux/magick
+          binaries/linux/magick --version || echo "Warning: magick binary may need runtime libs"
+          echo "ImageMagick magick copied to binaries/linux/"
 
       - name: Build Linux (AppImage + .deb)
         run: npm run build:linux
