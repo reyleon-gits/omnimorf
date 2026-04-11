@@ -247,12 +247,7 @@
     },
     "dmg": {
       "title": "Omnimorf ${version}",
-      "background": "assets/dmg-background.tiff",
-      "iconSize": 100,
-      "contents": [
-        { "x": 130, "y": 200 },
-        { "x": 410, "y": 200, "type": "link", "path": "/Applications" }
-      ]
+      "sign": false
     },
     "linux": {
       "target": [

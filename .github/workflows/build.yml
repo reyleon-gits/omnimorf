@@ -178,12 +178,6 @@ jobs:
           rm -rf icon.iconset
           echo "Generated assets/icon.icns"
 
-      - name: Create DMG background
-        run: |
-          # Generate a solid dark background (540x380) for the macOS DMG installer
-          binaries/mac/magick -size 540x380 xc:'#070711' assets/dmg-background.tiff
-          echo "DMG background created at assets/dmg-background.tiff"
-
       - name: Build macOS (DMG + ZIP — x64 + arm64)
         run: npm run build:mac
         env:
