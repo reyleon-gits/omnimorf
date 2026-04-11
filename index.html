@@ -882,15 +882,41 @@ const FORMAT_MAP = {
         dropText: 'MP3, WAV, FLAC, AAC, OGG, M4A, OPUS, WMA, AIFF + more',
     },
     document: {
-        accept: '.pdf,.docx,.xlsx,.pptx,.txt,.md,.html,.rtf,.csv,.odt,.ods,.odp',
-        outputs: [
-            { value: 'application/pdf', label: 'PDF', ext: 'pdf' },
-            { value: 'text/plain', label: 'TXT', ext: 'txt' },
-            { value: 'text/html', label: 'HTML', ext: 'html' },
-            { value: 'text/markdown', label: 'Markdown', ext: 'md' },
-            { value: 'text/csv', label: 'CSV', ext: 'csv' },
+        accept: '.pdf,.doc,.docx,.docm,.dot,.dotx,.dotm,.odt,.ott,.fodt,.rtf,.wpd,.wps,.wri,.abw,.sxw,.xls,.xlsx,.xlsm,.xlt,.xltx,.xlsb,.ods,.ots,.fods,.csv,.tsv,.dif,.slk,.dbf,.wk1,.wk3,.wk4,.123,.sxc,.ppt,.pptx,.pptm,.pps,.ppsx,.ppsm,.pot,.potx,.potm,.odp,.otp,.fodp,.sxi,.txt,.log,.nfo,.ini,.cfg,.conf,.md,.markdown,.html,.htm,.xhtml,.mht,.mhtml,.xml,.json,.yaml,.yml,.toml,.tex,.latex,.rst,.org,.wiki,.textile,.epub,.fb2',
+        outputsWeb: [
+            { value: 'application/pdf',  label: 'PDF',  ext: 'pdf'  },
+            { value: 'text/plain',       label: 'TXT',  ext: 'txt'  },
+            { value: 'text/html',        label: 'HTML', ext: 'html' },
+            { value: 'text/csv',         label: 'CSV',  ext: 'csv'  },
         ],
-        dropText: 'PDF, DOCX, XLSX, PPTX, TXT, Markdown, HTML, RTF, CSV',
+        outputsDesktop: [
+            // Universal output
+            { value: 'application/pdf',  label: 'PDF',  ext: 'pdf'  },
+            // Word processing
+            { value: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', label: 'DOCX (Word)',  ext: 'docx' },
+            { value: 'application/msword', label: 'DOC (Word 97-2003)', ext: 'doc' },
+            { value: 'application/vnd.oasis.opendocument.text', label: 'ODT (OpenDocument Text)', ext: 'odt' },
+            { value: 'application/rtf',  label: 'RTF (Rich Text)',    ext: 'rtf'  },
+            // Spreadsheets
+            { value: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', label: 'XLSX (Excel)', ext: 'xlsx' },
+            { value: 'application/vnd.ms-excel', label: 'XLS (Excel 97-2003)', ext: 'xls' },
+            { value: 'application/vnd.oasis.opendocument.spreadsheet', label: 'ODS (OpenDocument Spreadsheet)', ext: 'ods' },
+            { value: 'text/csv',         label: 'CSV (Comma-Separated)',  ext: 'csv'  },
+            // Presentations
+            { value: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', label: 'PPTX (PowerPoint)', ext: 'pptx' },
+            { value: 'application/vnd.ms-powerpoint', label: 'PPT (PowerPoint 97-2003)', ext: 'ppt' },
+            { value: 'application/vnd.oasis.opendocument.presentation', label: 'ODP (OpenDocument Presentation)', ext: 'odp' },
+            // Text / Markup
+            { value: 'text/plain',       label: 'TXT (Plain Text)',   ext: 'txt'  },
+            { value: 'text/html',        label: 'HTML (Web Page)',    ext: 'html' },
+            { value: 'text/markdown',    label: 'Markdown (.md)',     ext: 'md'   },
+            // eBooks
+            { value: 'application/epub+zip', label: 'EPUB (eBook)',   ext: 'epub' },
+            // Data interchange
+            { value: 'application/json', label: 'JSON (Data)',        ext: 'json' },
+            { value: 'application/xml',  label: 'XML (Structured)',   ext: 'xml'  },
+        ],
+        dropText: 'PDF, DOCX, DOC, XLSX, XLS, PPTX, PPT, ODT, ODS, ODP, RTF, EPUB, CSV, HTML, TXT, MD + 50 more',
     },
 };
 
@@ -904,9 +930,8 @@ const CANVAS_NATIVE = ['image/jpeg', 'image/png', 'image/webp', 'image/bmp', 'im
 function getOutputs(cat) {
     const fm = FORMAT_MAP[cat];
     if (!fm) return [];
-    if (fm.outputs) return fm.outputs; // document
     const paid = !!window.electronAPI && currentTier !== 'free';
-    let formats = paid ? fm.outputsDesktop : fm.outputsWeb;
+    let formats = paid ? (fm.outputsDesktop || []) : (fm.outputsWeb || []);
     // Append OCR outputs for image category (Pro+ tiers with OCR feature)
     if (cat === 'image' && paid && tierCan('ocr') && fm.ocrOutputs) {
         formats = [...formats, ...fm.ocrOutputs];
@@ -1202,8 +1227,16 @@ async function convertFile(entry) {
         animBar(entry.id, 0, 0, 100);
         setBadge(entry.id, 'error', 'Error');
         document.getElementById('card-' + entry.id).classList.add('error');
-        document.getElementById('sz-' + entry.id).outerHTML = `<span class="meta-err">${err.message || 'conversion failed'}</span>`;
-        addAuditEntry(`Failed: ${entry.file.name} — ${err.message}`, 'fail');
+
+        // User-friendly error for missing LibreOffice
+        let errMsg = err.message || 'conversion failed';
+        if (errMsg.includes('LIBREOFFICE_NOT_FOUND')) {
+            errMsg = 'Requires LibreOffice (free) — install from libreoffice.org';
+            toast('This format needs LibreOffice (free, open-source). Install it from libreoffice.org, restart Omnimorf, and try again. Common formats like DOCX, XLSX, CSV, TXT, MD, HTML work without it.', 8000);
+        }
+
+        document.getElementById('sz-' + entry.id).outerHTML = `<span class="meta-err">${errMsg}</span>`;
+        addAuditEntry(`Failed: ${entry.file.name} — ${errMsg}`, 'fail');
     }
 
     updateLabel();

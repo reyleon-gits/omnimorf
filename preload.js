@@ -33,6 +33,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // ── Hash Verification ────────────────────────────────────
     hashFile:    (opts) => ipcRenderer.invoke('omnimorf:hash-file', opts),
 
+    // ── Document Engine (LibreOffice status) ───────────────────
+    checkLibreOffice: () => ipcRenderer.invoke('omnimorf:check-libreoffice'),
+
     // ── License Key (Polar.sh) ───────────────────────────────
     licenseActivate:   (opts) => ipcRenderer.invoke('omnimorf:license-activate', opts),
     licenseCheck:      ()     => ipcRenderer.invoke('omnimorf:license-check'),

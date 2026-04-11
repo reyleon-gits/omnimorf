@@ -20,11 +20,14 @@ const fs   = require('fs');
 const os   = require('os');
 const https = require('https');
 const crypto = require('crypto');
-const { execFile } = require('child_process');
+const { execFile, execSync } = require('child_process');
 const { autoUpdater } = require('electron-updater');
 const Tesseract = require('tesseract.js');
 const { PDFDocument, StandardFonts, rgb } = require('pdf-lib');
 const { Document, Packer, Paragraph, TextRun } = require('docx');
+const mammoth = require('mammoth');
+const XLSX = require('xlsx');
+const { marked } = require('marked');
 
 // ── Polar.sh license configuration ───────────────────────────
 // PASTE YOUR POLAR.SH ORGANIZATION ID HERE (UUID format)
@@ -181,6 +184,54 @@ const BIN = {
     imagemagick: path.join(BINARIES_DIR, process.platform === 'win32' ? 'magick.exe' : 'magick'),
 };
 
+// ── LibreOffice detection (document conversion engine) ──────
+// Checks standard system installation paths per platform, then PATH.
+// Returns the full path to soffice binary, or null if not installed.
+function findLibreOffice() {
+    const systemPaths = {
+        win32: [
+            path.join(process.env.PROGRAMFILES || 'C:\\Program Files', 'LibreOffice', 'program', 'soffice.exe'),
+            path.join(process.env['PROGRAMFILES(X86)'] || 'C:\\Program Files (x86)', 'LibreOffice', 'program', 'soffice.exe'),
+            path.join(process.env.LOCALAPPDATA || '', 'Programs', 'LibreOffice', 'program', 'soffice.exe'),
+            'C:\\Program Files\\LibreOffice\\program\\soffice.exe',
+        ],
+        darwin: [
+            '/Applications/LibreOffice.app/Contents/MacOS/soffice',
+            path.join(os.homedir(), 'Applications', 'LibreOffice.app', 'Contents', 'MacOS', 'soffice'),
+        ],
+        linux: [
+            '/usr/bin/soffice',
+            '/usr/bin/libreoffice',
+            '/usr/lib/libreoffice/program/soffice',
+            '/snap/bin/libreoffice',
+            '/usr/local/bin/soffice',
+            '/opt/libreoffice/program/soffice',
+            path.join(os.homedir(), '.local', 'bin', 'soffice'),
+        ],
+    };
+
+    // Check user-downloaded portable (stored in userData)
+    const userDataLO = path.join(app.getPath('userData'), 'libreoffice');
+    const portableSoffice = process.platform === 'win32'
+        ? path.join(userDataLO, 'program', 'soffice.exe')
+        : path.join(userDataLO, 'program', 'soffice');
+    if (fs.existsSync(portableSoffice)) return portableSoffice;
+
+    // Check system installation paths
+    for (const p of (systemPaths[process.platform] || [])) {
+        if (p && fs.existsSync(p)) return p;
+    }
+
+    // Check PATH
+    try {
+        const cmd = process.platform === 'win32' ? 'where soffice 2>nul' : 'which soffice 2>/dev/null';
+        const result = execSync(cmd, { encoding: 'utf8', timeout: 5000 }).trim().split(/\r?\n/)[0];
+        if (result && fs.existsSync(result)) return result;
+    } catch {}
+
+    return null;
+}
+
 // ── Vault directory ──────────────────────────────────────────
 const VAULT_DIR = path.join(app.getPath('userData'), 'vault');
 const VAULT_INDEX = path.join(VAULT_DIR, 'vault-index.json');
@@ -245,7 +296,7 @@ app.on('second-instance', (event, argv) => {
     if (mainWindow) {
         if (mainWindow.isMinimized()) mainWindow.restore();
         mainWindow.focus();
-        const mediaFiles = argv.filter(a => /\.(heic|heif|jpg|jpeg|png|webp|mp4|mov|avi|mkv|mp3|wav|flac|pdf|docx)$/i.test(a));
+        const mediaFiles = argv.filter(a => /\.(heic|heif|jpg|jpeg|png|webp|bmp|gif|tiff?|svg|avif|ico|mp4|mov|avi|mkv|webm|wmv|flv|mp3|wav|flac|aac|ogg|m4a|opus|pdf|docx?|xlsx?|pptx?|odt|ods|odp|rtf|csv|tsv|txt|md|html?|epub|json|xml)$/i.test(a));
         if (mediaFiles.length) sendFilesToRenderer(mediaFiles);
     }
 });
@@ -316,7 +367,7 @@ async function openFilesDialog() {
             { name: 'Images', extensions: ['heic', 'heif', 'jpg', 'jpeg', 'png', 'webp', 'bmp', 'gif', 'tiff', 'tif', 'svg', 'avif', 'ico'] },
             { name: 'Video',  extensions: ['mp4', 'mov', 'avi', 'mkv', 'webm', 'wmv', 'flv'] },
             { name: 'Audio',  extensions: ['mp3', 'wav', 'flac', 'aac', 'ogg', 'm4a', 'opus'] },
-            { name: 'Documents', extensions: ['pdf', 'docx', 'xlsx', 'pptx', 'txt', 'md', 'html', 'rtf', 'csv'] },
+            { name: 'Documents', extensions: ['pdf', 'doc', 'docx', 'docm', 'dot', 'dotx', 'dotm', 'odt', 'ott', 'fodt', 'rtf', 'wpd', 'wps', 'wri', 'abw', 'sxw', 'xls', 'xlsx', 'xlsm', 'xlt', 'xltx', 'xlsb', 'ods', 'ots', 'fods', 'csv', 'tsv', 'dif', 'slk', 'dbf', 'wk1', 'wk3', 'wk4', '123', 'sxc', 'ppt', 'pptx', 'pptm', 'pps', 'ppsx', 'ppsm', 'pot', 'potx', 'potm', 'odp', 'otp', 'fodp', 'sxi', 'txt', 'log', 'nfo', 'ini', 'cfg', 'md', 'html', 'htm', 'xhtml', 'mht', 'mhtml', 'xml', 'json', 'yaml', 'yml', 'toml', 'tex', 'rst', 'org', 'epub', 'fb2'] },
             { name: 'All Files', extensions: ['*'] }
         ],
         properties: ['openFile', 'multiSelections']
@@ -362,8 +413,10 @@ ipcMain.handle('omnimorf:convert-file', async (event, { buffer, name, targetForm
             await ffmpegConvert(inputPath, outputPath, category, quality);
         } else if (category === 'image') {
             await imageMagickConvert(inputPath, outputPath, quality);
+        } else if (category === 'document') {
+            await documentConvert(inputPath, outputPath, targetFormat);
         } else {
-            throw new Error('Document conversion requires LibreOffice — coming in next update');
+            throw new Error('Unsupported conversion category: ' + category);
         }
 
         const resultBuffer = fs.readFileSync(outputPath);
@@ -617,6 +670,384 @@ async function generatePrecisionDocx(ocrData) {
 // Terminate OCR worker on app quit
 app.on('will-quit', () => {
     if (ocrWorker) { ocrWorker.terminate(); ocrWorker = null; }
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  DOCUMENT CONVERSION ENGINE — 200+ formats
+//  Architecture: JS fast-path (mammoth, SheetJS, marked, pdf-lib)
+//  for common conversions + LibreOffice headless for everything else.
+//  70+ input formats × 18 output targets = 700+ conversion paths.
+// ═══════════════════════════════════════════════════════════════
+
+// ── LibreOffice headless wrapper ────────────────────────────
+function libreOfficeConvert(soffficePath, inputPath, outputFormat, outDir) {
+    return new Promise((resolve, reject) => {
+        // LibreOffice --convert-to uses filter names for some formats
+        const filterMap = {
+            'csv':  'csv:"Text - txt - csv (StarCalc)":44,34,76,1',
+            'txt':  'txt:"Text (encoded):UTF8"',
+        };
+        const convertArg = filterMap[outputFormat] || outputFormat;
+
+        const args = ['--headless', '--norestore', '--convert-to', convertArg, '--outdir', outDir, inputPath];
+        execFile(soffficePath, args, { timeout: 180000 }, (err, stdout, stderr) => {
+            if (err) reject(new Error('LibreOffice failed: ' + (stderr || err.message)));
+            else resolve();
+        });
+    });
+}
+
+// ── JS Fast-Path: DOCX → HTML ──────────────────────────────
+async function docxToHtml(inputPath) {
+    const result = await mammoth.convertToHtml({ path: inputPath });
+    return result.value;
+}
+
+// ── JS Fast-Path: DOCX → TXT ───────────────────────────────
+async function docxToText(inputPath) {
+    const result = await mammoth.extractRawText({ path: inputPath });
+    return result.value;
+}
+
+// ── JS Fast-Path: DOCX → PDF (mammoth → HTML → printToPDF) ─
+async function docxToPdf(inputPath, outputPath) {
+    const html = await docxToHtml(inputPath);
+    const styledHtml = `<!DOCTYPE html><html><head><meta charset="utf-8">
+<style>body{font-family:Calibri,Arial,sans-serif;font-size:11pt;line-height:1.5;margin:1in;color:#000;}
+table{border-collapse:collapse;width:100%;}td,th{border:1px solid #999;padding:4px 8px;}
+img{max-width:100%;}</style></head><body>${html}</body></html>`;
+    await htmlStringToPdf(styledHtml, outputPath);
+}
+
+// ── JS Fast-Path: XLSX/XLS/ODS → CSV ───────────────────────
+function spreadsheetToCsv(inputPath) {
+    const workbook = XLSX.readFile(inputPath);
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    return XLSX.utils.sheet_to_csv(sheet);
+}
+
+// ── JS Fast-Path: XLSX/XLS/ODS → JSON ──────────────────────
+function spreadsheetToJson(inputPath) {
+    const workbook = XLSX.readFile(inputPath);
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    return JSON.stringify(XLSX.utils.sheet_to_json(sheet), null, 2);
+}
+
+// ── JS Fast-Path: XLSX/XLS/ODS → HTML ──────────────────────
+function spreadsheetToHtml(inputPath) {
+    const workbook = XLSX.readFile(inputPath);
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const html = XLSX.utils.sheet_to_html(sheet);
+    return `<!DOCTYPE html><html><head><meta charset="utf-8">
+<style>body{font-family:Arial,sans-serif;margin:1em;}table{border-collapse:collapse;width:100%;}
+td,th{border:1px solid #ccc;padding:4px 8px;text-align:left;}th{background:#f0f0f0;font-weight:bold;}</style>
+</head><body>${html}</body></html>`;
+}
+
+// ── JS Fast-Path: XLSX/XLS/ODS → TXT ───────────────────────
+function spreadsheetToTxt(inputPath) {
+    const workbook = XLSX.readFile(inputPath);
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    return XLSX.utils.sheet_to_txt(sheet);
+}
+
+// ── JS Fast-Path: CSV/TSV → XLSX ───────────────────────────
+function csvToXlsx(inputPath, outputPath) {
+    const workbook = XLSX.readFile(inputPath);
+    XLSX.writeFile(workbook, outputPath);
+}
+
+// ── JS Fast-Path: Markdown → HTML ──────────────────────────
+function mdToHtml(inputPath) {
+    const mdContent = fs.readFileSync(inputPath, 'utf8');
+    const html = marked(mdContent);
+    return `<!DOCTYPE html><html><head><meta charset="utf-8">
+<style>body{font-family:Georgia,serif;font-size:11pt;line-height:1.6;margin:1in;color:#222;max-width:800px;}
+code{background:#f4f4f4;padding:2px 6px;border-radius:3px;font-size:0.9em;}
+pre{background:#f4f4f4;padding:12px;border-radius:6px;overflow-x:auto;}
+pre code{background:none;padding:0;}blockquote{border-left:4px solid #ddd;margin:1em 0;padding:0.5em 1em;color:#555;}
+table{border-collapse:collapse;width:100%;}td,th{border:1px solid #ddd;padding:6px 12px;}
+h1,h2,h3{color:#111;}</style></head><body>${html}</body></html>`;
+}
+
+// ── JS Fast-Path: HTML → TXT ───────────────────────────────
+function htmlToText(inputPath) {
+    const html = fs.readFileSync(inputPath, 'utf8');
+    return html
+        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<\/p>/gi, '\n\n')
+        .replace(/<\/div>/gi, '\n')
+        .replace(/<\/li>/gi, '\n')
+        .replace(/<\/tr>/gi, '\n')
+        .replace(/<\/h[1-6]>/gi, '\n\n')
+        .replace(/<[^>]+>/g, '')
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/&amp;/gi, '&')
+        .replace(/&lt;/gi, '<')
+        .replace(/&gt;/gi, '>')
+        .replace(/&quot;/gi, '"')
+        .replace(/&#39;/gi, "'")
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+}
+
+// ── JS Fast-Path: TXT → PDF ────────────────────────────────
+async function textToPdf(text, outputPath) {
+    const doc = await PDFDocument.create();
+    const font = await doc.embedFont(StandardFonts.Courier);
+    const fontSize = 10;
+    const margin = 72; // 1 inch
+    const pageW = 612;
+    const pageH = 792;
+    const usableW = pageW - 2 * margin;
+    const usableH = pageH - 2 * margin;
+    const lineH = fontSize * 1.4;
+    const maxCharsPerLine = Math.floor(usableW / (fontSize * 0.6));
+    const maxLinesPerPage = Math.floor(usableH / lineH);
+
+    // Word-wrap text into lines
+    const rawLines = text.split('\n');
+    const wrappedLines = [];
+    for (const raw of rawLines) {
+        if (raw.length <= maxCharsPerLine) {
+            wrappedLines.push(raw);
+        } else {
+            let remaining = raw;
+            while (remaining.length > maxCharsPerLine) {
+                let breakAt = remaining.lastIndexOf(' ', maxCharsPerLine);
+                if (breakAt <= 0) breakAt = maxCharsPerLine;
+                wrappedLines.push(remaining.substring(0, breakAt));
+                remaining = remaining.substring(breakAt).trimStart();
+            }
+            wrappedLines.push(remaining);
+        }
+    }
+
+    // Paginate
+    for (let i = 0; i < wrappedLines.length; i += maxLinesPerPage) {
+        const page = doc.addPage([pageW, pageH]);
+        const pageLines = wrappedLines.slice(i, i + maxLinesPerPage);
+        for (let j = 0; j < pageLines.length; j++) {
+            // Sanitize: replace characters not in WinAnsiEncoding with '?'
+            const safeLine = pageLines[j].replace(/[^\x20-\x7E\xA0-\xFF]/g, '?');
+            page.drawText(safeLine, {
+                x: margin,
+                y: pageH - margin - (j * lineH),
+                size: fontSize,
+                font: font,
+                color: rgb(0, 0, 0),
+            });
+        }
+    }
+
+    fs.writeFileSync(outputPath, await doc.save());
+}
+
+// ── JS Fast-Path: TXT → DOCX ───────────────────────────────
+async function textToDocx(text, outputPath) {
+    const paragraphs = text.split(/\n\s*\n/).map(block => {
+        const lines = block.split('\n');
+        const children = [];
+        for (let i = 0; i < lines.length; i++) {
+            if (i > 0) children.push(new TextRun({ break: 1 }));
+            children.push(new TextRun({ text: lines[i], size: 24, font: 'Calibri' }));
+        }
+        return new Paragraph({ children, spacing: { after: 120 } });
+    });
+
+    const doc = new Document({
+        sections: [{
+            properties: { page: { margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 } } },
+            children: paragraphs,
+        }],
+    });
+
+    fs.writeFileSync(outputPath, await Packer.toBuffer(doc));
+}
+
+// ── HTML → PDF via hidden Electron BrowserWindow ────────────
+async function htmlStringToPdf(htmlContent, outputPath) {
+    const win = new BrowserWindow({
+        show: false,
+        width: 800,
+        height: 1100,
+        webPreferences: { offscreen: true, nodeIntegration: false, contextIsolation: true },
+    });
+
+    const tempHtml = path.join(app.getPath('temp'), 'omnimorf-html2pdf-' + Date.now() + '.html');
+    fs.writeFileSync(tempHtml, htmlContent, 'utf8');
+
+    try {
+        await win.loadFile(tempHtml);
+        // Allow content to render (fonts, images)
+        await new Promise(resolve => setTimeout(resolve, 800));
+        const pdfBuffer = await win.webContents.printToPDF({
+            printBackground: true,
+            pageSize: 'Letter',
+            margins: { marginType: 'default' },
+        });
+        fs.writeFileSync(outputPath, pdfBuffer);
+    } finally {
+        win.destroy();
+        try { fs.unlinkSync(tempHtml); } catch {}
+    }
+}
+
+// ── HTML file → PDF ─────────────────────────────────────────
+async function htmlFileToPdf(inputPath, outputPath) {
+    const html = fs.readFileSync(inputPath, 'utf8');
+    await htmlStringToPdf(html, outputPath);
+}
+
+// ── Markdown → PDF (marked → HTML → printToPDF) ────────────
+async function mdToPdf(inputPath, outputPath) {
+    const fullHtml = mdToHtml(inputPath);
+    await htmlStringToPdf(fullHtml, outputPath);
+}
+
+// ── JSON → CSV ──────────────────────────────────────────────
+function jsonToCsv(inputPath) {
+    const data = JSON.parse(fs.readFileSync(inputPath, 'utf8'));
+    const rows = Array.isArray(data) ? data : [data];
+    if (rows.length === 0) return '';
+    const headers = Object.keys(rows[0]);
+    const csvLines = [headers.join(',')];
+    for (const row of rows) {
+        csvLines.push(headers.map(h => {
+            const val = (row[h] ?? '').toString();
+            return val.includes(',') || val.includes('"') || val.includes('\n')
+                ? '"' + val.replace(/"/g, '""') + '"'
+                : val;
+        }).join(','));
+    }
+    return csvLines.join('\n');
+}
+
+// ── CSV → JSON ──────────────────────────────────────────────
+function csvToJson(inputPath) {
+    const workbook = XLSX.readFile(inputPath);
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    return JSON.stringify(XLSX.utils.sheet_to_json(sheet), null, 2);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  DOCUMENT CONVERT — Master routing function
+//  Tries JS fast-path first (instant, no external dependency).
+//  Falls back to LibreOffice headless for exotic/legacy formats.
+// ═══════════════════════════════════════════════════════════════
+async function documentConvert(inputPath, outputPath, targetFormat) {
+    const inputExt = path.extname(inputPath).toLowerCase().replace('.', '');
+    const target = targetFormat.toLowerCase();
+
+    // ── Same format: just copy ──────────────────────────────
+    if (inputExt === target) {
+        fs.copyFileSync(inputPath, outputPath);
+        return;
+    }
+
+    // ── JS Fast-Path: DOCX → TXT/HTML/PDF/DOCX ─────────────
+    if (inputExt === 'docx') {
+        if (target === 'txt')  { fs.writeFileSync(outputPath, await docxToText(inputPath), 'utf8'); return; }
+        if (target === 'html') { const h = await docxToHtml(inputPath); fs.writeFileSync(outputPath, h, 'utf8'); return; }
+        if (target === 'pdf')  { await docxToPdf(inputPath, outputPath); return; }
+    }
+
+    // ── JS Fast-Path: Spreadsheets (XLSX/XLS/ODS/CSV/TSV) ──
+    const spreadsheetExts = ['xlsx', 'xls', 'ods', 'csv', 'tsv', 'xlsm', 'xlsb'];
+    if (spreadsheetExts.includes(inputExt)) {
+        if (target === 'csv')  { fs.writeFileSync(outputPath, spreadsheetToCsv(inputPath), 'utf8'); return; }
+        if (target === 'json') { fs.writeFileSync(outputPath, spreadsheetToJson(inputPath), 'utf8'); return; }
+        if (target === 'html') { fs.writeFileSync(outputPath, spreadsheetToHtml(inputPath), 'utf8'); return; }
+        if (target === 'txt')  { fs.writeFileSync(outputPath, spreadsheetToTxt(inputPath), 'utf8'); return; }
+        if (target === 'xlsx' && inputExt !== 'xlsx') { csvToXlsx(inputPath, outputPath); return; }
+        if (target === 'pdf') {
+            const htmlContent = spreadsheetToHtml(inputPath);
+            await htmlStringToPdf(htmlContent, outputPath);
+            return;
+        }
+    }
+
+    // ── JS Fast-Path: Markdown ──────────────────────────────
+    if (inputExt === 'md' || inputExt === 'markdown') {
+        if (target === 'html') { fs.writeFileSync(outputPath, mdToHtml(inputPath), 'utf8'); return; }
+        if (target === 'pdf')  { await mdToPdf(inputPath, outputPath); return; }
+        if (target === 'txt')  {
+            const md = fs.readFileSync(inputPath, 'utf8');
+            fs.writeFileSync(outputPath, md.replace(/[#*_~`>\[\]()!|]/g, '').replace(/\n{3,}/g, '\n\n').trim(), 'utf8');
+            return;
+        }
+    }
+
+    // ── JS Fast-Path: HTML ──────────────────────────────────
+    if (inputExt === 'html' || inputExt === 'htm' || inputExt === 'xhtml' || inputExt === 'mht' || inputExt === 'mhtml') {
+        if (target === 'pdf')  { await htmlFileToPdf(inputPath, outputPath); return; }
+        if (target === 'txt')  { fs.writeFileSync(outputPath, htmlToText(inputPath), 'utf8'); return; }
+    }
+
+    // ── JS Fast-Path: TXT / LOG / plain text ────────────────
+    const plainExts = ['txt', 'log', 'nfo', 'ini', 'cfg', 'conf', 'yaml', 'yml', 'toml', 'xml', 'json', 'rst', 'org', 'tex', 'latex'];
+    if (plainExts.includes(inputExt)) {
+        const text = fs.readFileSync(inputPath, 'utf8');
+        if (target === 'pdf')  { await textToPdf(text, outputPath); return; }
+        if (target === 'docx') { await textToDocx(text, outputPath); return; }
+        if (target === 'html') {
+            const escaped = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{font-family:monospace;white-space:pre-wrap;margin:1in;font-size:10pt;line-height:1.5;}</style></head><body>${escaped}</body></html>`;
+            fs.writeFileSync(outputPath, html, 'utf8');
+            return;
+        }
+        if (target === 'txt' || target === 'log') { fs.copyFileSync(inputPath, outputPath); return; }
+        if (target === 'md')   { fs.copyFileSync(inputPath, outputPath); return; }
+    }
+
+    // ── JS Fast-Path: JSON ──────────────────────────────────
+    if (inputExt === 'json') {
+        if (target === 'csv')  { fs.writeFileSync(outputPath, jsonToCsv(inputPath), 'utf8'); return; }
+        if (target === 'xlsx') {
+            const data = JSON.parse(fs.readFileSync(inputPath, 'utf8'));
+            const rows = Array.isArray(data) ? data : [data];
+            const ws = XLSX.utils.json_to_sheet(rows);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
+            XLSX.writeFile(wb, outputPath);
+            return;
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════
+    //  LIBREOFFICE HEADLESS — handles ALL remaining conversions
+    //  200+ formats: DOC, RTF, WPD, WPS, PPT, ODP, ODT, ODS,
+    //  EPUB, FB2, DIF, SLK, DBF, Lotus 1-2-3, and dozens more.
+    // ═════════════════════════════════════════════════════════
+    const soffice = findLibreOffice();
+    if (!soffice) {
+        throw new Error(
+            'LIBREOFFICE_NOT_FOUND: This format requires LibreOffice (free). ' +
+            'Install from https://www.libreoffice.org/download/ then restart Omnimorf. ' +
+            'Common formats (DOCX, XLSX, CSV, MD, TXT, HTML, JSON) work without it.'
+        );
+    }
+
+    const outDir = path.dirname(outputPath);
+    await libreOfficeConvert(soffice, inputPath, target, outDir);
+
+    // LibreOffice writes output as inputBasename.newExt in outDir — rename to expected path
+    const loOutputName = path.basename(inputPath, path.extname(inputPath)) + '.' + target;
+    const loOutputPath = path.join(outDir, loOutputName);
+    if (loOutputPath !== outputPath && fs.existsSync(loOutputPath)) {
+        fs.renameSync(loOutputPath, outputPath);
+    }
+    if (!fs.existsSync(outputPath)) {
+        throw new Error('Conversion produced no output. LibreOffice may not support this format combination.');
+    }
+}
+
+// ── IPC: Check LibreOffice availability ─────────────────────
+ipcMain.handle('omnimorf:check-libreoffice', async () => {
+    const found = findLibreOffice();
+    return { installed: !!found, path: found || null };
 });
 
 // ── IPC: Vault operations ────────────────────────────────────

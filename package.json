@@ -106,6 +106,96 @@
         "name": "FLAC Audio",
         "description": "FLAC Audio File",
         "role": "Editor"
+      },
+      {
+        "ext": "pdf",
+        "name": "PDF Document",
+        "description": "PDF Document File",
+        "role": "Editor"
+      },
+      {
+        "ext": "docx",
+        "name": "Word Document",
+        "description": "Microsoft Word Document",
+        "role": "Editor"
+      },
+      {
+        "ext": "doc",
+        "name": "Word Document (Legacy)",
+        "description": "Microsoft Word 97-2003 Document",
+        "role": "Editor"
+      },
+      {
+        "ext": "xlsx",
+        "name": "Excel Spreadsheet",
+        "description": "Microsoft Excel Spreadsheet",
+        "role": "Editor"
+      },
+      {
+        "ext": "xls",
+        "name": "Excel Spreadsheet (Legacy)",
+        "description": "Microsoft Excel 97-2003 Spreadsheet",
+        "role": "Editor"
+      },
+      {
+        "ext": "pptx",
+        "name": "PowerPoint Presentation",
+        "description": "Microsoft PowerPoint Presentation",
+        "role": "Editor"
+      },
+      {
+        "ext": "ppt",
+        "name": "PowerPoint Presentation (Legacy)",
+        "description": "Microsoft PowerPoint 97-2003 Presentation",
+        "role": "Editor"
+      },
+      {
+        "ext": "odt",
+        "name": "OpenDocument Text",
+        "description": "OpenDocument Text File",
+        "role": "Editor"
+      },
+      {
+        "ext": "ods",
+        "name": "OpenDocument Spreadsheet",
+        "description": "OpenDocument Spreadsheet File",
+        "role": "Editor"
+      },
+      {
+        "ext": "odp",
+        "name": "OpenDocument Presentation",
+        "description": "OpenDocument Presentation File",
+        "role": "Editor"
+      },
+      {
+        "ext": "csv",
+        "name": "CSV Data",
+        "description": "Comma-Separated Values File",
+        "role": "Editor"
+      },
+      {
+        "ext": "rtf",
+        "name": "Rich Text Format",
+        "description": "Rich Text Format Document",
+        "role": "Editor"
+      },
+      {
+        "ext": "epub",
+        "name": "EPUB eBook",
+        "description": "Electronic Publication eBook",
+        "role": "Editor"
+      },
+      {
+        "ext": "txt",
+        "name": "Text File",
+        "description": "Plain Text File",
+        "role": "Editor"
+      },
+      {
+        "ext": "md",
+        "name": "Markdown File",
+        "description": "Markdown Document",
+        "role": "Editor"
       }
     ],
     "win": {
@@ -179,7 +269,10 @@
   "dependencies": {
     "docx": "^9.6.1",
     "electron-updater": "^6.8.3",
+    "mammoth": "^1.8.0",
+    "marked": "^15.0.0",
     "pdf-lib": "^1.17.1",
-    "tesseract.js": "^7.0.0"
+    "tesseract.js": "^7.0.0",
+    "xlsx": "^0.18.5"
   }
 }
