@@ -21,6 +21,7 @@ const os   = require('os');
 const https = require('https');
 const crypto = require('crypto');
 const { execFile } = require('child_process');
+const { autoUpdater } = require('electron-updater');
 
 // ── Polar.sh license configuration ───────────────────────────
 // PASTE YOUR POLAR.SH ORGANIZATION ID HERE (UUID format)
@@ -246,11 +247,53 @@ app.on('second-instance', (event, argv) => {
     }
 });
 
+// ── Auto-updater (checks GitHub Releases — fully offline between checks) ──
+autoUpdater.autoDownload = false;
+autoUpdater.autoInstallOnAppQuit = true;
+
+autoUpdater.on('update-available', (info) => {
+    if (!mainWindow) return;
+    dialog.showMessageBox(mainWindow, {
+        type: 'info',
+        title: 'Update Available',
+        message: `Omnimorf v${info.version} is available`,
+        detail: 'A new version is ready. Download now? It will install when you restart.',
+        buttons: ['Download', 'Later'],
+        defaultId: 0
+    }).then(({ response }) => {
+        if (response === 0) autoUpdater.downloadUpdate();
+    });
+});
+
+autoUpdater.on('update-downloaded', () => {
+    if (!mainWindow) return;
+    dialog.showMessageBox(mainWindow, {
+        type: 'info',
+        title: 'Update Ready',
+        message: 'Update downloaded successfully.',
+        detail: 'Restart Omnimorf now to install the update?',
+        buttons: ['Restart Now', 'Later'],
+        defaultId: 0
+    }).then(({ response }) => {
+        if (response === 0) autoUpdater.quitAndInstall();
+    });
+});
+
+autoUpdater.on('error', (err) => {
+    console.log('[Omnimorf Updater] Error:', err.message);
+});
+
 // ── App ready ────────────────────────────────────────────────
 app.whenReady().then(() => {
     ensureVaultDir();
     createWindow();
     buildMenu();
+
+    // Check for updates 5 seconds after launch (packaged builds only)
+    if (app.isPackaged) {
+        setTimeout(() => autoUpdater.checkForUpdates().catch(() => {}), 5000);
+    }
+
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });
@@ -690,6 +733,31 @@ function buildMenu() {
             role: 'help',
             submenu: [
                 {
+                    label: 'Check for Updates…',
+                    click: () => {
+                        autoUpdater.checkForUpdates().then(result => {
+                            if (!result || !result.updateInfo || result.updateInfo.version === app.getVersion()) {
+                                dialog.showMessageBox(mainWindow, {
+                                    type: 'info',
+                                    title: 'No Updates',
+                                    message: 'You are running the latest version.',
+                                    detail: `Omnimorf v${app.getVersion()}`,
+                                    buttons: ['OK']
+                                });
+                            }
+                        }).catch(() => {
+                            dialog.showMessageBox(mainWindow, {
+                                type: 'warning',
+                                title: 'Update Check Failed',
+                                message: 'Could not check for updates.',
+                                detail: 'Please check your internet connection and try again.',
+                                buttons: ['OK']
+                            });
+                        });
+                    }
+                },
+                { type: 'separator' },
+                {
                     label: 'About Omnimorf',
                     click: () => {
                         dialog.showMessageBox(mainWindow, {
@@ -697,7 +765,7 @@ function buildMenu() {
                             title:   'About Omnimorf',
                             message: 'Omnimorf',
                             detail: [
-                                'Version 1.0.0',
+                                `Version ${app.getVersion()}`,
                                 '',
                                 'Every format. Zero uploads. One price. Forever.',
                                 '100% local — your files never leave your device.',

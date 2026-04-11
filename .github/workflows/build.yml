@@ -75,11 +75,15 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path dist/release | Out-Null
           Get-ChildItem -Path dist -Filter "*Setup*.exe" | ForEach-Object { Copy-Item $_.FullName "dist/release/Omnimorf-Setup-Windows.exe" -Force }
+          # Auto-update metadata
+          if (Test-Path "dist/latest.yml") { Copy-Item "dist/latest.yml" "dist/release/latest.yml" }
 
       - uses: actions/upload-artifact@v4
         with:
           name: omnimorf-windows
-          path: dist/release/*.exe
+          path: |
+            dist/release/*.exe
+            dist/release/latest.yml
 
   # ══════════════════════════════════════════════════════════════
   #  MACOS BUILD
@@ -112,11 +116,31 @@ jobs:
           rm -rf ffmpeg-tmp ffmpeg.zip
           echo "FFmpeg copied to binaries/mac/"
 
-      - name: Install ImageMagick (macOS via Homebrew)
+      - name: Build ImageMagick 7 static (macOS)
         run: |
-          brew install imagemagick
-          cp $(which magick) binaries/mac/magick
+          # Homebrew's magick is dynamically linked — breaks without Homebrew on customer machines
+          # Build from source: static-link format libs, only system frameworks remain dynamic
+          brew install pkg-config jpeg-turbo libpng libtiff webp
+          curl -L -o im.tar.gz "https://imagemagick.org/archive/ImageMagick.tar.gz"
+          tar -xf im.tar.gz
+          cd ImageMagick-*
+          ./configure --prefix=/tmp/im7 \
+            --enable-static --disable-shared \
+            --without-x --without-perl --without-magick-plus-plus \
+            --with-modules=no \
+            --with-jpeg --with-png --with-tiff --with-webp \
+            PKG_CONFIG_PATH="$(brew --prefix jpeg-turbo)/lib/pkgconfig:$(brew --prefix libpng)/lib/pkgconfig:$(brew --prefix libtiff)/lib/pkgconfig:$(brew --prefix webp)/lib/pkgconfig" \
+            LDFLAGS="-L$(brew --prefix jpeg-turbo)/lib -L$(brew --prefix libpng)/lib -L$(brew --prefix libtiff)/lib -L$(brew --prefix webp)/lib" \
+            CPPFLAGS="-I$(brew --prefix jpeg-turbo)/include -I$(brew --prefix libpng)/include -I$(brew --prefix libtiff)/include -I$(brew --prefix webp)/include"
+          make -j$(sysctl -n hw.ncpu)
+          make install
+          cd ..
+          cp /tmp/im7/bin/magick binaries/mac/magick
           chmod +x binaries/mac/magick
+          # Verify it runs standalone
+          binaries/mac/magick --version
+          rm -rf ImageMagick-* im.tar.gz /tmp/im7
+          echo "ImageMagick static magick copied to binaries/mac/"
 
       - name: Ad-hoc sign bundled binaries
         run: |
@@ -141,7 +165,7 @@ jobs:
           rm -rf icon.iconset
           echo "Generated assets/icon.icns"
 
-      - name: Build macOS (DMG — x64 + arm64)
+      - name: Build macOS (DMG + ZIP — x64 + arm64)
         run: npm run build:mac
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -159,11 +183,21 @@ jobs:
             else cp "$f" "dist/release/Omnimorf-macOS-Intel.dmg"
             fi
           done
+          for f in dist/*.zip; do
+            if [[ "$f" == *"arm64"* ]]; then cp "$f" "dist/release/Omnimorf-macOS-AppleSilicon.zip"
+            else cp "$f" "dist/release/Omnimorf-macOS-Intel.zip"
+            fi
+          done
+          # Auto-update metadata (electron-updater reads these from GitHub Releases)
+          cp dist/latest-mac.yml dist/release/ 2>/dev/null || true
 
       - uses: actions/upload-artifact@v4
         with:
           name: omnimorf-macos
-          path: dist/release/*.dmg
+          path: |
+            dist/release/*.dmg
+            dist/release/*.zip
+            dist/release/latest-mac.yml
 
   # ══════════════════════════════════════════════════════════════
   #  LINUX BUILD
@@ -241,6 +275,8 @@ jobs:
           mkdir -p dist/release
           for f in dist/*.AppImage; do cp "$f" "dist/release/Omnimorf-Linux.AppImage"; done
           for f in dist/*.deb; do cp "$f" "dist/release/Omnimorf-Linux.deb"; done
+          # Auto-update metadata
+          cp dist/latest-linux.yml dist/release/ 2>/dev/null || true
 
       - uses: actions/upload-artifact@v4
         with:
@@ -265,7 +301,7 @@ jobs:
       - name: Flatten artifacts
         run: |
           mkdir -p release-assets
-          find artifacts -type f \( -name "*.exe" -o -name "*.dmg" -o -name "*.AppImage" -o -name "*.deb" \) -exec cp {} release-assets/ \;
+          find artifacts -type f \( -name "*.exe" -o -name "*.dmg" -o -name "*.zip" -o -name "*.AppImage" -o -name "*.deb" -o -name "latest*.yml" \) -exec cp {} release-assets/ \;
           ls -la release-assets
 
       - name: Publish GitHub Release
