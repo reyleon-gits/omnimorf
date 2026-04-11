@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Universal file converter — 1000+ formats, 100% local, offline, cross-platform",
   "main": "main.js",
-  "author": "Blanton Banks II",
+  "author": "Blanton Banks II <support@omnimorf.com>",
   "license": "UNLICENSED",
   "scripts": {
     "start": "electron .",
