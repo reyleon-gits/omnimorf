@@ -823,6 +823,11 @@ const FORMAT_MAP = {
             { value: 'image/x-xbitmap', label: 'XBM', ext: 'xbm' },
             { value: 'image/x-xpixmap', label: 'XPM', ext: 'xpm' },
         ],
+        ocrOutputs: [
+            { value: 'text/plain',      label: 'TXT (OCR Extract)',  ext: 'txt',  ocr: true },
+            { value: 'application/pdf', label: 'PDF (OCR Extract)',  ext: 'pdf',  ocr: true },
+            { value: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', label: 'DOCX (OCR Extract)', ext: 'docx', ocr: true },
+        ],
         dropText: 'HEIC, HEIF, JPG, PNG, WebP, BMP, GIF, TIFF, SVG, AVIF, ICO + 15 more',
     },
     video: {
@@ -901,7 +906,12 @@ function getOutputs(cat) {
     if (!fm) return [];
     if (fm.outputs) return fm.outputs; // document
     const paid = !!window.electronAPI && currentTier !== 'free';
-    return paid ? fm.outputsDesktop : fm.outputsWeb;
+    let formats = paid ? fm.outputsDesktop : fm.outputsWeb;
+    // Append OCR outputs for image category (Pro+ tiers with OCR feature)
+    if (cat === 'image' && paid && tierCan('ocr') && fm.ocrOutputs) {
+        formats = [...formats, ...fm.ocrOutputs];
+    }
+    return formats;
 }
 
 // ── STATE ────────────────────────────────────────────────────
@@ -1126,7 +1136,7 @@ async function convertFile(entry) {
         else if (activeCat === 'image' && CANVAS_NATIVE.includes(targetMime)) {
             blob = await canvasConvert(entry.file, targetMime, quality);
         }
-        // Route 3: Video/Audio/Document/extended-image → Electron IPC (desktop only)
+        // Route 3: Video/Audio/Document/OCR/extended-image → Electron IPC (desktop only)
         else if (window.electronAPI && window.electronAPI.convertFile) {
             animBar(entry.id, 40, 60, 500);
             const buffer = await entry.file.arrayBuffer();
@@ -1134,6 +1144,7 @@ async function convertFile(entry) {
                 buffer, name: entry.file.name,
                 targetFormat: targetExt, quality: quality,
                 category: activeCat,
+                ocr: entry.outputFmt.ocr || false,
             });
             blob = new Blob([result.buffer], { type: targetMime });
         }

@@ -65,6 +65,13 @@ jobs:
           Remove-Item -Recurse -Force magick-tmp, magick.7z
           Write-Host "ImageMagick magick.exe copied to binaries/win/"
 
+      - name: Download Tesseract OCR language data
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path binaries/win/tessdata | Out-Null
+          Invoke-WebRequest -Uri "https://github.com/tesseract-ocr/tessdata_fast/raw/main/eng.traineddata" -OutFile "binaries/win/tessdata/eng.traineddata"
+          Write-Host "Tesseract eng.traineddata downloaded to binaries/win/tessdata/"
+
       - name: Build Windows (NSIS installer)
         run: npm run build:win
         env:
@@ -141,6 +148,12 @@ jobs:
           binaries/mac/magick --version
           rm -rf ImageMagick-* im.tar.gz /tmp/im7
           echo "ImageMagick static magick copied to binaries/mac/"
+
+      - name: Download Tesseract OCR language data
+        run: |
+          mkdir -p binaries/mac/tessdata
+          curl -L -o binaries/mac/tessdata/eng.traineddata "https://github.com/tesseract-ocr/tessdata_fast/raw/main/eng.traineddata"
+          echo "Tesseract eng.traineddata downloaded to binaries/mac/tessdata/"
 
       - name: Ad-hoc sign bundled binaries
         run: |
@@ -264,6 +277,12 @@ jobs:
           chmod +x binaries/linux/magick
           binaries/linux/magick --version || echo "Warning: magick binary may need runtime libs"
           echo "ImageMagick magick copied to binaries/linux/"
+
+      - name: Download Tesseract OCR language data
+        run: |
+          mkdir -p binaries/linux/tessdata
+          curl -L -o binaries/linux/tessdata/eng.traineddata "https://github.com/tesseract-ocr/tessdata_fast/raw/main/eng.traineddata"
+          echo "Tesseract eng.traineddata downloaded to binaries/linux/tessdata/"
 
       - name: Build Linux (AppImage + .deb)
         run: npm run build:linux

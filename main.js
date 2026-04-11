@@ -22,6 +22,9 @@ const https = require('https');
 const crypto = require('crypto');
 const { execFile } = require('child_process');
 const { autoUpdater } = require('electron-updater');
+const Tesseract = require('tesseract.js');
+const { PDFDocument, StandardFonts, rgb } = require('pdf-lib');
+const { Document, Packer, Paragraph, TextRun } = require('docx');
 
 // ── Polar.sh license configuration ───────────────────────────
 // PASTE YOUR POLAR.SH ORGANIZATION ID HERE (UUID format)
@@ -343,7 +346,7 @@ function sendFilesToRenderer(filePaths) {
 ipcMain.on('omnimorf:request-open', () => openFilesDialog());
 
 // ── IPC: Convert file via native binaries ────────────────────
-ipcMain.handle('omnimorf:convert-file', async (event, { buffer, name, targetFormat, quality, category }) => {
+ipcMain.handle('omnimorf:convert-file', async (event, { buffer, name, targetFormat, quality, category, ocr }) => {
     const tempDir = path.join(app.getPath('temp'), 'omnimorf-convert');
     if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
 
@@ -353,7 +356,9 @@ ipcMain.handle('omnimorf:convert-file', async (event, { buffer, name, targetForm
     fs.writeFileSync(inputPath, Buffer.from(buffer));
 
     try {
-        if (category === 'video' || category === 'audio') {
+        if (ocr) {
+            await ocrConvert(inputPath, outputPath, targetFormat);
+        } else if (category === 'video' || category === 'audio') {
             await ffmpegConvert(inputPath, outputPath, category, quality);
         } else if (category === 'image') {
             await imageMagickConvert(inputPath, outputPath, quality);
@@ -418,6 +423,107 @@ function imageMagickConvert(input, output, quality) {
         });
     });
 }
+
+// ── OCR Engine (Tesseract.js) ────────────────────────────────
+let ocrWorker = null;
+
+async function getOcrWorker() {
+    if (!ocrWorker) {
+        const tessdataPath = path.join(BINARIES_DIR, 'tessdata');
+        const cachePath = path.join(app.getPath('userData'), 'tessdata-cache');
+        if (!fs.existsSync(cachePath)) fs.mkdirSync(cachePath, { recursive: true });
+
+        ocrWorker = await Tesseract.createWorker('eng', 1, {
+            langPath: fs.existsSync(tessdataPath) ? tessdataPath : cachePath,
+            cachePath: cachePath,
+        });
+    }
+    return ocrWorker;
+}
+
+async function ocrConvert(inputPath, outputPath, targetFormat) {
+    const worker = await getOcrWorker();
+    const { data } = await worker.recognize(inputPath);
+    const text = data.text || '';
+
+    if (targetFormat === 'txt') {
+        fs.writeFileSync(outputPath, text, 'utf8');
+    } else if (targetFormat === 'pdf') {
+        const pdfBytes = await generatePdfFromOcr(text, inputPath);
+        fs.writeFileSync(outputPath, pdfBytes);
+    } else if (targetFormat === 'docx') {
+        const docxBytes = await generateDocxFromOcr(text);
+        fs.writeFileSync(outputPath, docxBytes);
+    } else {
+        throw new Error('Unsupported OCR output format: ' + targetFormat);
+    }
+}
+
+async function generatePdfFromOcr(text, imagePath) {
+    const doc = await PDFDocument.create();
+    const fontSize = 12;
+    const margin = 50;
+    const lineHeight = fontSize * 1.5;
+    const maxWidth = 612 - (margin * 2); // Letter width in points
+
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+
+    // Word-wrap and paginate
+    const rawLines = text.split('\n');
+    const wrappedLines = [];
+    for (const raw of rawLines) {
+        if (raw.trim() === '') { wrappedLines.push(''); continue; }
+        const words = raw.split(/\s+/);
+        let line = '';
+        for (const word of words) {
+            const test = line ? line + ' ' + word : word;
+            if (font.widthOfTextAtSize(test, fontSize) > maxWidth && line) {
+                wrappedLines.push(line);
+                line = word;
+            } else {
+                line = test;
+            }
+        }
+        if (line) wrappedLines.push(line);
+    }
+
+    let page = doc.addPage([612, 792]); // Letter size
+    let y = 792 - margin;
+
+    for (const line of wrappedLines) {
+        if (y < margin + lineHeight) {
+            page = doc.addPage([612, 792]);
+            y = 792 - margin;
+        }
+        if (line.trim()) {
+            page.drawText(line, {
+                x: margin, y, size: fontSize, font, color: rgb(0, 0, 0),
+            });
+        }
+        y -= lineHeight;
+    }
+
+    return Buffer.from(await doc.save());
+}
+
+async function generateDocxFromOcr(text) {
+    const paragraphs = text.split('\n').map(line =>
+        new Paragraph({
+            children: [new TextRun({ text: line, size: 24 })], // 12pt = 24 half-points
+        })
+    );
+
+    const doc = new Document({
+        sections: [{ children: paragraphs }],
+    });
+
+    return await Packer.toBuffer(doc);
+}
+
+// Terminate OCR worker on app quit
+app.on('will-quit', () => {
+    if (ocrWorker) { ocrWorker.terminate(); ocrWorker = null; }
+});
 
 // ── IPC: Vault operations ────────────────────────────────────
 ipcMain.handle('omnimorf:vault-save', async (event, { name, buffer, hash, passphrase }) => {
