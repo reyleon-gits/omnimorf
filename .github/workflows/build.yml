@@ -48,21 +48,21 @@ jobs:
         shell: pwsh
         run: |
           # Query GitHub API for latest release — never hardcode a version URL
+          # ImageMagick portable builds are .7z (not .zip)
           $headers = @{ 'User-Agent' = 'Omnimorf-CI' }
           $release = Invoke-RestMethod -Uri "https://api.github.com/repos/ImageMagick/ImageMagick/releases/latest" -Headers $headers
-          $asset = $release.assets | Where-Object { $_.name -match "ImageMagick-.*portable-Q16-x64\.zip$" } | Select-Object -First 1
+          $asset = $release.assets | Where-Object { $_.name -match "ImageMagick-.*portable-Q16-x64\.7z$" } | Select-Object -First 1
           if (-not $asset) {
-            # Fallback: try HDRI variant
-            $asset = $release.assets | Where-Object { $_.name -match "ImageMagick-.*portable-Q16-HDRI-x64\.zip$" } | Select-Object -First 1
+            $asset = $release.assets | Where-Object { $_.name -match "ImageMagick-.*portable-Q16-HDRI-x64\.7z$" } | Select-Object -First 1
           }
-          if (-not $asset) { throw "No portable ImageMagick ZIP found in latest GitHub release" }
+          if (-not $asset) { throw "No portable ImageMagick 7z found in latest GitHub release" }
           Write-Host "Downloading: $($asset.name)"
-          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile magick.zip
-          Expand-Archive -Path magick.zip -DestinationPath magick-tmp -Force
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile magick.7z
+          7z x magick.7z -omagick-tmp -y | Out-Null
           $mg = Get-ChildItem -Path magick-tmp -Recurse -Filter "magick.exe" | Select-Object -First 1
           if (-not $mg) { throw "magick.exe not found in extracted archive" }
           Copy-Item -Path $mg.FullName -Destination "binaries/win/magick.exe"
-          Remove-Item -Recurse -Force magick-tmp, magick.zip
+          Remove-Item -Recurse -Force magick-tmp, magick.7z
           Write-Host "ImageMagick magick.exe copied to binaries/win/"
 
       - name: Build Windows (NSIS installer)
