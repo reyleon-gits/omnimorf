@@ -947,6 +947,15 @@ async function documentConvert(inputPath, outputPath, targetFormat) {
         return;
     }
 
+    // ── Image files dropped in Document tab → ImageMagick ───
+    // Users may drop a PNG/JPG into the Document tab expecting PDF.
+    // ImageMagick handles image→PDF (and any image→image) natively.
+    const imageExts = ['png','jpg','jpeg','heic','heif','webp','bmp','gif','tiff','tif','svg','avif','ico','psd','tga','pcx','exr','hdr','jxl','jp2','dds','xbm','xpm','pbm','pgm','ppm','icns'];
+    if (imageExts.includes(inputExt)) {
+        await imageMagickConvert(inputPath, outputPath, 1.0);
+        return;
+    }
+
     // ── JS Fast-Path: DOCX → TXT/HTML/PDF/DOCX ─────────────
     if (inputExt === 'docx') {
         if (target === 'txt')  { fs.writeFileSync(outputPath, await docxToText(inputPath), 'utf8'); return; }
