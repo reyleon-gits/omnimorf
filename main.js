@@ -179,9 +179,50 @@ const BINARIES_DIR = app.isPackaged
     ? path.join(process.resourcesPath, 'binaries')
     : path.join(__dirname, 'binaries');
 
+// Find a binary: bundled first, then system PATH
+function findBinary(bundledName, systemNames) {
+    const exe = process.platform === 'win32' ? bundledName + '.exe' : bundledName;
+
+    // 1a. Check bundled directory (packaged layout: binaries/<exe>)
+    const bundled = path.join(BINARIES_DIR, exe);
+    if (fs.existsSync(bundled)) return bundled;
+
+    // 1b. Check platform subdirectory (dev layout: binaries/win/<exe>)
+    const platformDir = process.platform === 'win32' ? 'win' : process.platform === 'darwin' ? 'mac' : 'linux';
+    const devBundled = path.join(BINARIES_DIR, platformDir, exe);
+    if (fs.existsSync(devBundled)) return devBundled;
+
+    // 2. Check common system install paths (Windows)
+    if (process.platform === 'win32') {
+        const winPaths = [
+            path.join(process.env.LOCALAPPDATA || '', 'Programs', bundledName, bundledName + '.exe'),
+            path.join(process.env.PROGRAMFILES || 'C:\\Program Files', bundledName, 'bin', bundledName + '.exe'),
+            path.join(process.env.PROGRAMFILES || 'C:\\Program Files', bundledName, bundledName + '.exe'),
+            `C:\\ffmpeg\\bin\\${bundledName}.exe`,
+            `C:\\ffmpeg\\${bundledName}.exe`,
+        ];
+        for (const p of winPaths) {
+            if (fs.existsSync(p)) return p;
+        }
+    }
+
+    // 3. Check PATH via 'where' (Windows) or 'which' (Unix)
+    for (const name of systemNames) {
+        try {
+            const cmd = process.platform === 'win32'
+                ? `where ${name} 2>nul`
+                : `which ${name} 2>/dev/null`;
+            const result = execSync(cmd, { encoding: 'utf8', timeout: 5000 }).trim().split(/\r?\n/)[0];
+            if (result && fs.existsSync(result)) return result;
+        } catch {}
+    }
+
+    return null;
+}
+
 const BIN = {
-    ffmpeg:      path.join(BINARIES_DIR, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'),
-    imagemagick: path.join(BINARIES_DIR, process.platform === 'win32' ? 'magick.exe' : 'magick'),
+    ffmpeg:      findBinary('ffmpeg', ['ffmpeg']),
+    imagemagick: findBinary('magick', ['magick', 'convert']),
 };
 
 // ── LibreOffice detection (document conversion engine) ──────
@@ -378,17 +419,27 @@ async function openFilesDialog() {
 }
 
 // ── Read files from disk → send to renderer ──────────────────
+// Send only metadata + path for large files to avoid OOM.
+// Files under 50 MB still get buffered for instant preview.
+const BUFFER_THRESHOLD = 50 * 1024 * 1024; // 50 MB
+
 function sendFilesToRenderer(filePaths) {
     if (!mainWindow) return;
     const files = filePaths
         .filter(p => fs.existsSync(p))
         .map(p => {
-            const buffer = fs.readFileSync(p);
-            return {
-                name: path.basename(p),
-                size: buffer.length,
-                buffer: buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)
-            };
+            const stat = fs.statSync(p);
+            if (stat.size <= BUFFER_THRESHOLD) {
+                const buffer = fs.readFileSync(p);
+                return {
+                    name: path.basename(p),
+                    size: buffer.length,
+                    filePath: p,
+                    buffer: buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)
+                };
+            }
+            // Large files: send path only — no memory copy
+            return { name: path.basename(p), size: stat.size, filePath: p, buffer: null };
         });
     if (files.length) mainWindow.webContents.send('omnimorf:open-files', files);
 }
@@ -397,14 +448,28 @@ function sendFilesToRenderer(filePaths) {
 ipcMain.on('omnimorf:request-open', () => openFilesDialog());
 
 // ── IPC: Convert file via native binaries ────────────────────
-ipcMain.handle('omnimorf:convert-file', async (event, { buffer, name, targetFormat, quality, category, ocr }) => {
+// Accepts EITHER a buffer OR a filePath. For large files (video, audio,
+// large docs), filePath avoids copying GB of data through IPC.
+// Returns EITHER a buffer (small results) or an outputPath (large results).
+ipcMain.handle('omnimorf:convert-file', async (event, { buffer, filePath, name, targetFormat, quality, category, ocr }) => {
     const tempDir = path.join(app.getPath('temp'), 'omnimorf-convert');
     if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
 
-    const inputPath = path.join(tempDir, 'input-' + Date.now() + '-' + name);
-    const outputPath = path.join(tempDir, 'output-' + Date.now() + '.' + targetFormat);
+    const ts = Date.now();
+    let inputPath;
+    let inputIsTemp = false;
 
-    fs.writeFileSync(inputPath, Buffer.from(buffer));
+    if (filePath && fs.existsSync(filePath)) {
+        // Use the file directly from disk — zero memory overhead
+        inputPath = filePath;
+    } else {
+        // Fallback: write buffer to temp (small files, drag-drop without path)
+        inputPath = path.join(tempDir, 'input-' + ts + '-' + name);
+        fs.writeFileSync(inputPath, Buffer.from(buffer));
+        inputIsTemp = true;
+    }
+
+    const outputPath = path.join(tempDir, 'output-' + ts + '.' + targetFormat);
 
     try {
         if (ocr) {
@@ -419,20 +484,83 @@ ipcMain.handle('omnimorf:convert-file', async (event, { buffer, name, targetForm
             throw new Error('Unsupported conversion category: ' + category);
         }
 
-        const resultBuffer = fs.readFileSync(outputPath);
-        return { buffer: resultBuffer.buffer.slice(resultBuffer.byteOffset, resultBuffer.byteOffset + resultBuffer.byteLength) };
-    } finally {
-        try { fs.unlinkSync(inputPath); } catch {}
+        const outputSize = fs.statSync(outputPath).size;
+
+        // Small results (<50MB): return buffer directly (fast for images/docs)
+        // Large results (>=50MB): return path — renderer will use read-converted IPC
+        if (outputSize <= BUFFER_THRESHOLD) {
+            const resultBuffer = fs.readFileSync(outputPath);
+            try { fs.unlinkSync(outputPath); } catch {}
+            return { buffer: resultBuffer.buffer.slice(resultBuffer.byteOffset, resultBuffer.byteOffset + resultBuffer.byteLength) };
+        } else {
+            return { outputPath, outputSize };
+        }
+    } catch (err) {
         try { fs.unlinkSync(outputPath); } catch {}
+        throw err;
+    } finally {
+        if (inputIsTemp) { try { fs.unlinkSync(inputPath); } catch {} }
     }
 });
 
+// ── IPC: Read converted file in chunks or trigger save dialog ─
+// For large conversion results, renderer calls this to save directly to disk
+// without ever loading the full file into renderer memory.
+ipcMain.handle('omnimorf:save-converted', async (event, { outputPath, saveName }) => {
+    if (!outputPath || !fs.existsSync(outputPath)) {
+        throw new Error('Converted file not found');
+    }
+    const result = await dialog.showSaveDialog(mainWindow, {
+        defaultPath: saveName,
+        filters: [{ name: 'All Files', extensions: ['*'] }]
+    });
+    if (result.canceled) {
+        try { fs.unlinkSync(outputPath); } catch {}
+        return { saved: false };
+    }
+    fs.renameSync(outputPath, result.filePath);
+    return { saved: true, filePath: result.filePath };
+});
+
+// ── IPC: Read converted file back as buffer (for small-to-medium results) ──
+ipcMain.handle('omnimorf:read-converted', async (event, { outputPath }) => {
+    if (!outputPath || !fs.existsSync(outputPath)) {
+        throw new Error('Converted file not found');
+    }
+    const resultBuffer = fs.readFileSync(outputPath);
+    try { fs.unlinkSync(outputPath); } catch {}
+    return { buffer: resultBuffer.buffer.slice(resultBuffer.byteOffset, resultBuffer.byteOffset + resultBuffer.byteLength) };
+});
+
 // ── FFmpeg conversion ────────────────────────────────────────
+// Container pairs where stream copy (remux) is safe — no re-encoding needed
+const REMUX_PAIRS = new Set([
+    'mp4:mov', 'mov:mp4', 'mp4:mkv', 'mkv:mp4', 'mov:mkv', 'mkv:mov',
+    'mp4:ts',  'ts:mp4',  'mkv:ts',  'ts:mkv',
+    'mp3:mp3', 'aac:aac', 'wav:wav', 'flac:flac',
+    'mp4:m4v', 'm4v:mp4', 'mov:m4v', 'm4v:mov',
+]);
+
 function ffmpegConvert(input, output, category, quality) {
+    if (!BIN.ffmpeg) {
+        return Promise.reject(new Error(
+            'FFMPEG_NOT_FOUND: FFmpeg is required for video/audio conversion. ' +
+            'Download from https://www.gyan.dev/ffmpeg/builds/ (get the "essentials" build), ' +
+            'extract ffmpeg.exe into a "binaries" folder next to main.js, or add it to your system PATH. ' +
+            'Then restart Omnimorf.'
+        ));
+    }
     return new Promise((resolve, reject) => {
+        const inputExt  = path.extname(input).slice(1).toLowerCase();
+        const outputExt = path.extname(output).slice(1).toLowerCase();
+        const canRemux  = REMUX_PAIRS.has(inputExt + ':' + outputExt);
+
         const args = ['-i', input, '-y'];
 
-        if (category === 'video') {
+        if (canRemux) {
+            // Container swap only — copy all streams, no re-encoding (instant)
+            args.push('-c', 'copy');
+        } else if (category === 'video') {
             const crf = Math.round(51 - (quality * 51)); // quality 0-1 → CRF 51-0
             args.push('-c:v', 'libx264', '-crf', String(crf), '-preset', 'medium', '-c:a', 'aac');
         } else if (category === 'audio') {
@@ -442,7 +570,11 @@ function ffmpegConvert(input, output, category, quality) {
 
         args.push(output);
 
-        execFile(BIN.ffmpeg, args, { timeout: 300000 }, (err, stdout, stderr) => {
+        // Remux is near-instant; re-encoding large files can take 30+ min
+        const fileSize = fs.statSync(input).size;
+        const timeoutMs = canRemux ? 300000 : Math.max(300000, Math.round(fileSize / 1024 / 1024) * 60000);
+
+        execFile(BIN.ffmpeg, args, { timeout: timeoutMs, maxBuffer: 50 * 1024 * 1024 }, (err, stdout, stderr) => {
             if (err) reject(new Error('FFmpeg failed: ' + (stderr || err.message)));
             else resolve();
         });
@@ -451,6 +583,14 @@ function ffmpegConvert(input, output, category, quality) {
 
 // ── ImageMagick conversion ───────────────────────────────────
 function imageMagickConvert(input, output, quality) {
+    if (!BIN.imagemagick) {
+        return Promise.reject(new Error(
+            'IMAGEMAGICK_NOT_FOUND: ImageMagick is required for advanced image conversion. ' +
+            'Download from https://imagemagick.org/script/download.php (get the portable Q16-HDRI build), ' +
+            'extract magick.exe into a "binaries" folder next to main.js, or install and add to PATH. ' +
+            'Then restart Omnimorf.'
+        ));
+    }
     return new Promise((resolve, reject) => {
         const q = Math.round(quality * 100);
         const ext = path.extname(output).slice(1).toLowerCase();
@@ -470,7 +610,11 @@ function imageMagickConvert(input, output, quality) {
         // SVG output: ImageMagick rasterizes — let it through (vector trace not supported)
         args.push(output);
 
-        execFile(BIN.imagemagick, args, { timeout: 120000 }, (err, stdout, stderr) => {
+        // Scale timeout: 2 min base + 30s per 100MB for large images
+        const fileSize = fs.statSync(input).size;
+        const timeoutMs = Math.max(120000, 120000 + Math.round(fileSize / (100 * 1024 * 1024)) * 30000);
+
+        execFile(BIN.imagemagick, args, { timeout: timeoutMs, maxBuffer: 20 * 1024 * 1024 }, (err, stdout, stderr) => {
             if (err) reject(new Error('ImageMagick failed: ' + (stderr || err.message)));
             else resolve();
         });
@@ -690,7 +834,12 @@ function libreOfficeConvert(soffficePath, inputPath, outputFormat, outDir) {
         const convertArg = filterMap[outputFormat] || outputFormat;
 
         const args = ['--headless', '--norestore', '--convert-to', convertArg, '--outdir', outDir, inputPath];
-        execFile(soffficePath, args, { timeout: 180000 }, (err, stdout, stderr) => {
+
+        // Scale timeout: 3 min base + 1 min per 50MB for large documents
+        const fileSize = fs.existsSync(inputPath) ? fs.statSync(inputPath).size : 0;
+        const timeoutMs = Math.max(180000, 180000 + Math.round(fileSize / (50 * 1024 * 1024)) * 60000);
+
+        execFile(soffficePath, args, { timeout: timeoutMs, maxBuffer: 20 * 1024 * 1024 }, (err, stdout, stderr) => {
             if (err) reject(new Error('LibreOffice failed: ' + (stderr || err.message)));
             else resolve();
         });
@@ -881,8 +1030,8 @@ async function htmlStringToPdf(htmlContent, outputPath) {
 
     try {
         await win.loadFile(tempHtml);
-        // Allow content to render (fonts, images)
-        await new Promise(resolve => setTimeout(resolve, 800));
+        // Allow content to render (fonts, images) — wait for load + short buffer
+        await new Promise(resolve => setTimeout(resolve, 300));
         const pdfBuffer = await win.webContents.printToPDF({
             printBackground: true,
             pageSize: 'Letter',
@@ -1065,8 +1214,9 @@ ipcMain.handle('omnimorf:vault-save', async (event, { name, buffer, hash, passph
     const id = crypto.randomUUID();
     const filePath = path.join(VAULT_DIR, id);
 
-    // AES-256 encryption
-    const key = crypto.scryptSync(passphrase || 'omnimorf-default', 'omnimorf-salt', 32);
+    // AES-256 encryption with random salt + IV per entry
+    const salt = crypto.randomBytes(32);
+    const key = crypto.scryptSync(passphrase || 'omnimorf-default', salt, 32);
     const iv = crypto.randomBytes(16);
     const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
     const encrypted = Buffer.concat([cipher.update(Buffer.from(buffer)), cipher.final()]);
@@ -1075,7 +1225,7 @@ ipcMain.handle('omnimorf:vault-save', async (event, { name, buffer, hash, passph
 
     // Update index
     const index = JSON.parse(fs.readFileSync(VAULT_INDEX, 'utf8'));
-    index.push({ id, name, size: buffer.byteLength, encryptedSize: encrypted.length, hash, iv: iv.toString('hex'), savedAt: new Date().toISOString() });
+    index.push({ id, name, size: buffer.byteLength, encryptedSize: encrypted.length, hash, iv: iv.toString('hex'), salt: salt.toString('hex'), savedAt: new Date().toISOString() });
     fs.writeFileSync(VAULT_INDEX, JSON.stringify(index, null, 2));
 
     return { id, encryptedSize: encrypted.length };
@@ -1087,7 +1237,9 @@ ipcMain.handle('omnimorf:vault-load', async (event, { id, passphrase }) => {
     const entry = index.find(e => e.id === id);
     if (!entry) throw new Error('Vault entry not found');
 
-    const key = crypto.scryptSync(passphrase || 'omnimorf-default', 'omnimorf-salt', 32);
+    // Use per-entry salt if available, fall back to legacy static salt for old entries
+    const salt = entry.salt ? Buffer.from(entry.salt, 'hex') : 'omnimorf-salt';
+    const key = crypto.scryptSync(passphrase || 'omnimorf-default', salt, 32);
     const iv = Buffer.from(entry.iv, 'hex');
     const encrypted = fs.readFileSync(filePath);
     const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);

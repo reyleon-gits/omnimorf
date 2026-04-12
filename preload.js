@@ -20,6 +20,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
     // ── Native Conversion (FFmpeg / ImageMagick) ─────────────
     convertFile: (opts) => ipcRenderer.invoke('omnimorf:convert-file', opts),
+    saveConverted: (opts) => ipcRenderer.invoke('omnimorf:save-converted', opts),
+    readConverted: (opts) => ipcRenderer.invoke('omnimorf:read-converted', opts),
 
     // ── Vault (AES-256 encrypted storage) ────────────────────
     vaultSave:   (opts) => ipcRenderer.invoke('omnimorf:vault-save', opts),

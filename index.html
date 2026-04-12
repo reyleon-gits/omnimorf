@@ -424,6 +424,86 @@
         }
         @keyframes spin { to { transform: rotate(360deg); } }
 
+        /* ── VAULT TAB VIEW ─────────────────────────────────── */
+        .vault-view {
+            display: none; flex: 1; min-width: 0;
+            flex-direction: column; gap: 1rem;
+        }
+        .vault-view.active { display: flex; }
+        .vault-toolbar {
+            display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
+        }
+        .vault-toolbar .btn-vault {
+            padding: 6px 14px; font-family: var(--font); font-size: 0.78rem; font-weight: 600;
+            border: 1px solid var(--border); border-radius: 8px; cursor: pointer;
+            background: var(--surface); color: var(--text-dim); transition: all 0.15s;
+        }
+        .vault-toolbar .btn-vault:hover { background: var(--card-hover); color: var(--text); border-color: var(--accent); }
+        .vault-toolbar .btn-vault.primary { background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #fff; border-color: transparent; }
+        .vault-toolbar .btn-vault.primary:hover { box-shadow: 0 4px 16px rgba(124,58,237,0.3); }
+        .vault-breadcrumb {
+            display: flex; align-items: center; gap: 4px; font-size: 0.78rem; font-weight: 600; color: var(--text-dim);
+            padding: 0.5rem 0.75rem; background: var(--surface); border: 1px solid var(--border); border-radius: 9px; flex: 1; min-width: 200px;
+        }
+        .vault-breadcrumb span { cursor: pointer; transition: color 0.15s; }
+        .vault-breadcrumb span:hover { color: var(--accent); }
+        .vault-breadcrumb .bc-sep { color: var(--text-muted); cursor: default; font-size: 0.65rem; }
+        .vault-breadcrumb .bc-current { color: var(--text); cursor: default; }
+        .vault-grid {
+            display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 0.75rem;
+            flex: 1; overflow-y: auto; align-content: start;
+        }
+        .vault-card {
+            background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+            padding: 1rem; cursor: pointer; transition: all 0.15s; display: flex; flex-direction: column; gap: 0.5rem;
+        }
+        .vault-card:hover { border-color: var(--accent); background: var(--card-hover); transform: translateY(-1px); }
+        .vault-card.is-folder .vc-icon { font-size: 2rem; color: var(--warning); }
+        .vault-card.is-file .vc-icon { font-size: 2rem; color: var(--accent); }
+        .vc-icon { text-align: center; line-height: 1; }
+        .vc-name {
+            font-size: 0.75rem; font-weight: 600; text-align: center;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .vc-meta { font-size: 0.65rem; color: var(--text-muted); text-align: center; }
+        .vc-actions {
+            display: flex; justify-content: center; gap: 0.25rem; opacity: 0; transition: opacity 0.15s;
+        }
+        .vault-card:hover .vc-actions { opacity: 1; }
+        .vc-actions button {
+            width: 26px; height: 26px; border: 1px solid var(--border); border-radius: 6px;
+            background: var(--card); color: var(--text-dim); cursor: pointer; font-size: 0.65rem;
+            display: flex; align-items: center; justify-content: center; transition: all 0.15s;
+        }
+        .vc-actions button:hover { border-color: var(--accent); color: var(--text); }
+        .vault-empty-state {
+            text-align: center; padding: 4rem 2rem; color: var(--text-muted);
+        }
+        .vault-empty-state .ve-icon { font-size: 3rem; margin-bottom: 1rem; opacity: 0.4; }
+        .vault-empty-state .ve-title { font-size: 0.9rem; font-weight: 700; margin-bottom: 0.5rem; color: var(--text-dim); }
+        .vault-empty-state .ve-sub { font-size: 0.78rem; }
+        .vault-stats {
+            display: flex; gap: 1rem; align-items: center; padding: 0.5rem 0;
+        }
+        .vault-stats .vs-item {
+            font-size: 0.72rem; font-weight: 600; color: var(--text-dim);
+            display: flex; align-items: center; gap: 0.4rem;
+        }
+        .vault-stats .vs-item .vs-num { color: var(--text); }
+        .vault-meter-full {
+            flex: 1; height: 6px; background: rgba(255,255,255,0.06); border-radius: 3px; overflow: hidden; min-width: 80px;
+        }
+        .vault-meter-full .vmf-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--cyan)); border-radius: 3px; transition: width 0.3s; }
+
+        /* ── Vault passphrase modal ───────────────────────────── */
+        .vault-pass-input {
+            width: 100%; padding: 0.6rem 0.75rem; font-family: var(--font);
+            font-size: 0.85rem; background: var(--surface); color: var(--text);
+            border: 1px solid var(--border); border-radius: 8px; outline: none;
+            margin-bottom: 0.75rem;
+        }
+        .vault-pass-input:focus { border-color: var(--accent); }
+
         /* ── DESKTOP-ONLY BADGE ─────────────────────────────── */
         .desktop-tag {
             font-size: 0.6rem; font-weight: 600; padding: 2px 6px;
@@ -463,6 +543,7 @@
         <button class="nav-tab" data-cat="video" onclick="setCategory('video')">Video <span class="desktop-tag">Desktop</span></button>
         <button class="nav-tab" data-cat="audio" onclick="setCategory('audio')">Audio <span class="desktop-tag">Desktop</span></button>
         <button class="nav-tab" data-cat="document" onclick="setCategory('document')">Document <span class="desktop-tag">Desktop</span></button>
+        <button class="nav-tab" data-cat="vault" onclick="setCategory('vault')">&#x1F512; Vault</button>
     </div>
 
     <div class="header-right">
@@ -529,10 +610,35 @@
         </div>
     </div>
 
+    <!-- ══ VAULT TAB VIEW ═════════════════════════════════════ -->
+    <div class="vault-view" id="vaultView">
+        <div class="vault-toolbar">
+            <button class="btn-vault primary" onclick="vaultCreateFolder()">+ New Folder</button>
+            <button class="btn-vault" onclick="vaultImportFile()">&#x2B06; Import File</button>
+            <input type="file" id="vaultFileInput" multiple style="display:none">
+            <div class="vault-breadcrumb" id="vaultBreadcrumb">
+                <span onclick="vaultNavigate('/')">Vault</span>
+            </div>
+        </div>
+        <div class="vault-stats">
+            <div class="vs-item"><span class="vs-num" id="vaultFileCount">0</span> files</div>
+            <div class="vs-item"><span class="vs-num" id="vaultFolderCount">0</span> folders</div>
+            <div class="vs-item"><span class="vs-num" id="vaultTotalSize">0 B</span> / <span id="vaultMaxSize">5 GB</span></div>
+            <div class="vault-meter-full"><div class="vmf-fill" id="vaultMeterFull" style="width:0%"></div></div>
+        </div>
+        <div class="vault-grid" id="vaultGrid">
+            <div class="vault-empty-state" id="vaultEmptyState">
+                <div class="ve-icon">&#x1F512;</div>
+                <div class="ve-title">Your vault is empty</div>
+                <div class="ve-sub">Save converted files here or import files directly.<br>All files are AES-256 encrypted locally on your device.</div>
+            </div>
+        </div>
+    </div>
+
     <!-- Sidebar -->
-    <div class="side-col">
-        <!-- Vault Panel -->
-        <div class="panel">
+    <div class="side-col" id="sideCol">
+        <!-- Vault Mini Panel (sidebar summary, hidden when vault tab active) -->
+        <div class="panel" id="vaultMiniPanel">
             <div class="panel-header">
                 <span class="panel-title">&#x1F512; Vault</span>
                 <span class="opt-label" id="vaultUsage">0 B / 5 GB</span>
@@ -730,6 +836,18 @@
         <button class="modal-cta" onclick="window.open('landing.html#download','_blank')">Download Omnimorf Free &#x2192;</button>
         <p style="font-size:0.7rem;color:var(--text-muted);margin-top:0.75rem;">No credit card required. Upgrade anytime from inside the app.</p>
         <button class="modal-dismiss" onclick="closeDesktopModal()">Stay on web version</button>
+    </div>
+</div>
+
+<!-- ══ VAULT INPUT MODAL ══════════════════════════════════════ -->
+<div class="modal-overlay" id="vaultInputModal" onclick="closeVaultInput(event)">
+    <div class="modal" onclick="event.stopPropagation()" style="max-width:380px">
+        <div class="modal-title" id="vaultInputTitle">New Folder</div>
+        <p class="modal-sub" id="vaultInputSub">Enter a name for the new folder.</p>
+        <input type="text" class="vault-pass-input" id="vaultInputField" placeholder="Folder name" autofocus
+            onkeydown="if(event.key==='Enter')submitVaultInput()">
+        <button class="modal-cta" onclick="submitVaultInput()" id="vaultInputBtn">Create</button>
+        <button class="modal-dismiss" onclick="closeVaultInput()">Cancel</button>
     </div>
 </div>
 
@@ -951,6 +1069,24 @@ let auditLog = JSON.parse(localStorage.getItem('omnimorf_audit') || '[]');
 
 // ── CATEGORY SWITCHING ───────────────────────────────────────
 function setCategory(cat) {
+    // Vault tab — special handling
+    if (cat === 'vault') {
+        if (tierVaultSize() === 0) { showUpgradeModal('vault'); return; }
+        activeCat = cat;
+        document.querySelectorAll('.nav-tab').forEach(t => t.classList.toggle('active', t.dataset.cat === cat));
+        // Hide converter, show vault view
+        document.querySelector('.main-col').style.display = 'none';
+        document.getElementById('vaultView').classList.add('active');
+        document.getElementById('sideCol').style.display = 'none';
+        renderVaultView();
+        return;
+    }
+
+    // Restore converter view if coming from vault
+    document.querySelector('.main-col').style.display = '';
+    document.getElementById('vaultView').classList.remove('active');
+    document.getElementById('sideCol').style.display = '';
+
     if (cat !== 'image' && !tierFormats().includes(cat)) {
         if (!window.electronAPI) {
             showDesktopModal(cat);
@@ -1011,6 +1147,8 @@ dropZone.addEventListener('drop', e => {
     e.preventDefault();
     dropZone.classList.remove('over');
     const dropped = Array.from(e.dataTransfer.files);
+    // Electron provides native file.path on dropped files — attach for path-based conversion
+    dropped.forEach(f => { if (f.path) f._nativePath = f.path; });
     if (dropped.length) processFiles(dropped);
 });
 document.getElementById('fileInput').addEventListener('change', e => {
@@ -1164,14 +1302,32 @@ async function convertFile(entry) {
         // Route 3: Video/Audio/Document/OCR/extended-image → Electron IPC (desktop only)
         else if (window.electronAPI && window.electronAPI.convertFile) {
             animBar(entry.id, 40, 60, 500);
-            const buffer = await entry.file.arrayBuffer();
-            const result = await window.electronAPI.convertFile({
-                buffer, name: entry.file.name,
+
+            // Prefer file path over buffer to avoid OOM on large files
+            const nativePath = entry.file._nativePath || (entry.file.path || null);
+            let convertOpts = {
+                name: entry.file.name,
                 targetFormat: targetExt, quality: quality,
                 category: activeCat,
                 ocr: entry.outputFmt.ocr || false,
-            });
-            blob = new Blob([result.buffer], { type: targetMime });
+            };
+            if (nativePath) {
+                convertOpts.filePath = nativePath;
+            } else {
+                convertOpts.buffer = await entry.file.arrayBuffer();
+            }
+
+            const result = await window.electronAPI.convertFile(convertOpts);
+
+            // Large results return outputPath instead of buffer
+            if (result.outputPath) {
+                // Store path for save-to-disk; create a placeholder blob for UI
+                entry._outputPath = result.outputPath;
+                blob = new Blob([], { type: targetMime });
+                Object.defineProperty(blob, 'size', { value: result.outputSize });
+            } else {
+                blob = new Blob([result.buffer], { type: targetMime });
+            }
         }
         // Route 4: No Electron → show error for non-image
         else {
@@ -1186,14 +1342,14 @@ async function convertFile(entry) {
             addAuditEntry('Metadata stripped: ' + entry.file.name, 'success');
         }
 
-        // Generate hash if enabled
-        if (options.hashVerify) {
+        // Generate hash if enabled (skip for large files saved to disk)
+        if (options.hashVerify && !entry._outputPath) {
             entry.hash = await sha256(blob);
             addAuditEntry('SHA-256: ' + entry.file.name + ' → ' + entry.hash.substring(0, 16) + '...', 'success');
         }
 
         entry.blob = blob;
-        entry.convSize = blob.size;
+        entry.convSize = blob.size || 0;
         entry.status = 'done';
 
         animBar(entry.id, 90, 100, 150);
@@ -1228,11 +1384,17 @@ async function convertFile(entry) {
         setBadge(entry.id, 'error', 'Error');
         document.getElementById('card-' + entry.id).classList.add('error');
 
-        // User-friendly error for missing LibreOffice
+        // User-friendly errors for missing dependencies
         let errMsg = err.message || 'conversion failed';
         if (errMsg.includes('LIBREOFFICE_NOT_FOUND')) {
             errMsg = 'Requires LibreOffice (free) — install from libreoffice.org';
-            toast('This format needs LibreOffice (free, open-source). Install it from libreoffice.org, restart Omnimorf, and try again. Common formats like DOCX, XLSX, CSV, TXT, MD, HTML work without it.', 8000);
+            toast('This format needs LibreOffice (free, open-source). Install it from libreoffice.org, restart Omnimorf, and try again.', 8000);
+        } else if (errMsg.includes('FFMPEG_NOT_FOUND') || (errMsg.includes('ffmpeg') && errMsg.includes('ENOENT'))) {
+            errMsg = 'FFmpeg not found — required for video/audio conversion';
+            toast('FFmpeg is required for video/audio. Download from gyan.dev/ffmpeg/builds (essentials build), place ffmpeg.exe in HEICswap/binaries/ folder, then restart.', 8000);
+        } else if (errMsg.includes('IMAGEMAGICK_NOT_FOUND') || (errMsg.includes('magick') && errMsg.includes('ENOENT'))) {
+            errMsg = 'ImageMagick not found — required for advanced image conversion';
+            toast('ImageMagick is required. Download from imagemagick.org, place magick.exe in HEICswap/binaries/ folder, then restart.', 8000);
         }
 
         document.getElementById('sz-' + entry.id).outerHTML = `<span class="meta-err">${errMsg}</span>`;
@@ -1283,10 +1445,22 @@ function setBadge(id, cls, html) {
 }
 
 // ── DOWNLOAD ─────────────────────────────────────────────────
-function dlFile(id) {
+async function dlFile(id) {
     const entry = files.find(f => f.id === id);
-    if (!entry?.blob) return;
+    if (!entry) return;
     const name = (entry.renamed || baseName(entry.file.name)) + '.' + entry.outputFmt.ext;
+
+    // Large file: saved on disk via main process (never loaded into renderer)
+    if (entry._outputPath && window.electronAPI?.saveConverted) {
+        const res = await window.electronAPI.saveConverted({ outputPath: entry._outputPath, saveName: name });
+        if (res.saved) {
+            addAuditEntry('Saved: ' + name + ' → ' + res.filePath, 'success');
+            entry._outputPath = null; // consumed
+        }
+        return;
+    }
+
+    if (!entry.blob) return;
     const a = document.createElement('a');
     a.href = URL.createObjectURL(entry.blob);
     a.download = name;
@@ -1301,10 +1475,18 @@ async function downloadZip() {
     btn.innerHTML = 'Packing ZIP&#x2026;';
 
     const zip = new JSZip();
-    files.filter(f => f.status === 'done' && f.blob).forEach((entry, i) => {
+    const largeFiles = [];
+    files.filter(f => f.status === 'done').forEach((entry, i) => {
         const name = (entry.renamed || baseName(entry.file.name)) + '.' + entry.outputFmt.ext;
-        zip.file(name, entry.blob);
+        if (entry._outputPath) {
+            largeFiles.push(name); // Large files saved separately — can't zip in-memory
+        } else if (entry.blob) {
+            zip.file(name, entry.blob);
+        }
     });
+    if (largeFiles.length) {
+        toast(`${largeFiles.length} large file(s) must be downloaded individually (too large for ZIP).`, 5000);
+    }
 
     const content = await zip.generateAsync({ type: 'blob' });
     const a = document.createElement('a');
@@ -1448,6 +1630,7 @@ function saveToVault(id) {
             data: reader.result, // base64 data URL
             savedAt: new Date().toISOString(),
             hash: entry.hash || null,
+            folder: vaultCurrentPath || '/',
         };
 
         vaultFiles.push(item);
@@ -1459,6 +1642,7 @@ function saveToVault(id) {
             return;
         }
         renderVault();
+        if (activeCat === 'vault') renderVaultView();
         toast('Saved to vault: ' + name);
         addAuditEntry('Vault saved: ' + name + ' (' + fmtBytes(entry.blob.size) + ')', 'success');
     };
@@ -1506,9 +1690,321 @@ function removeFromVault(i) {
     vaultFiles.splice(i, 1);
     localStorage.setItem('omnimorf_vault', JSON.stringify(vaultFiles));
     renderVault();
+    if (activeCat === 'vault') renderVaultView();
     toast('Removed from vault: ' + name);
     addAuditEntry('Vault removed: ' + name, 'success');
 }
+
+// ── VAULT TAB — Full Vault Manager ──────────────────────────
+let vaultCurrentPath = '/';
+let vaultFolders = JSON.parse(localStorage.getItem('omnimorf_vault_folders') || '[\"/\"]');
+
+function saveVaultFolders() {
+    localStorage.setItem('omnimorf_vault_folders', JSON.stringify(vaultFolders));
+}
+
+// Ensure all vault items have a folder property (migration for existing data)
+vaultFiles.forEach(f => { if (!f.folder) f.folder = '/'; });
+
+function getVaultItemsInFolder(folderPath) {
+    return vaultFiles.filter(f => (f.folder || '/') === folderPath);
+}
+
+function getSubfolders(parentPath) {
+    const prefix = parentPath === '/' ? '/' : parentPath + '/';
+    const subs = new Set();
+    vaultFolders.forEach(f => {
+        if (f === parentPath) return;
+        if (f.startsWith(prefix)) {
+            // Get only direct children
+            const rest = f.slice(prefix.length);
+            const directChild = rest.split('/')[0];
+            if (directChild) subs.add(prefix === '/' ? '/' + directChild : prefix + directChild);
+        }
+    });
+    return Array.from(subs).sort();
+}
+
+function getFolderName(fullPath) {
+    if (fullPath === '/') return 'Vault';
+    const parts = fullPath.split('/').filter(Boolean);
+    return parts[parts.length - 1];
+}
+
+function renderVaultView() {
+    const grid = document.getElementById('vaultGrid');
+    const emptyState = document.getElementById('vaultEmptyState');
+    const items = getVaultItemsInFolder(vaultCurrentPath);
+    const subfolders = getSubfolders(vaultCurrentPath);
+
+    // Breadcrumb
+    const bc = document.getElementById('vaultBreadcrumb');
+    if (vaultCurrentPath === '/') {
+        bc.innerHTML = '<span class="bc-current">&#x1F512; Vault</span>';
+    } else {
+        const parts = vaultCurrentPath.split('/').filter(Boolean);
+        let html = '<span onclick="vaultNavigate(\'/\')">&#x1F512; Vault</span>';
+        let builtPath = '';
+        parts.forEach((p, i) => {
+            builtPath += '/' + p;
+            html += '<span class="bc-sep">&#x276F;</span>';
+            if (i === parts.length - 1) {
+                html += `<span class="bc-current">${p}</span>`;
+            } else {
+                const navPath = builtPath;
+                html += `<span onclick="vaultNavigate('${navPath}')">${p}</span>`;
+            }
+        });
+        bc.innerHTML = html;
+    }
+
+    // Stats
+    const totalFiles = vaultFiles.length;
+    const totalFolders = vaultFolders.length - 1; // exclude root
+    const totalBytes = vaultFiles.reduce((sum, v) => sum + v.size, 0);
+    const maxBytes = tierVaultSize();
+    document.getElementById('vaultFileCount').textContent = totalFiles;
+    document.getElementById('vaultFolderCount').textContent = totalFolders;
+    document.getElementById('vaultTotalSize').textContent = fmtBytes(totalBytes);
+    document.getElementById('vaultMaxSize').textContent = maxBytes < 0 ? 'Unlimited' : fmtBytes(maxBytes);
+    const pct = maxBytes > 0 ? Math.min(100, (totalBytes / maxBytes) * 100) : 0;
+    document.getElementById('vaultMeterFull').style.width = pct + '%';
+
+    if (subfolders.length === 0 && items.length === 0) {
+        grid.innerHTML = '';
+        grid.appendChild(createVaultEmpty());
+        return;
+    }
+
+    let html = '';
+
+    // Folders first
+    subfolders.forEach(fp => {
+        const name = getFolderName(fp);
+        const count = getVaultItemsInFolder(fp).length;
+        html += `
+            <div class="vault-card is-folder" ondblclick="vaultNavigate('${fp}')">
+                <div class="vc-icon">&#x1F4C1;</div>
+                <div class="vc-name" title="${name}">${name}</div>
+                <div class="vc-meta">${count} file${count !== 1 ? 's' : ''}</div>
+                <div class="vc-actions">
+                    <button onclick="event.stopPropagation();vaultRenameFolder('${fp}')" title="Rename">&#x270F;</button>
+                    <button onclick="event.stopPropagation();vaultDeleteFolder('${fp}')" title="Delete">&#x2716;</button>
+                </div>
+            </div>
+        `;
+    });
+
+    // Files
+    items.forEach((v, _) => {
+        const idx = vaultFiles.indexOf(v);
+        const dateStr = v.savedAt ? new Date(v.savedAt).toLocaleDateString() : '';
+        html += `
+            <div class="vault-card is-file">
+                <div class="vc-icon">&#x1F4C4;</div>
+                <div class="vc-name" title="${v.name}">${v.name}</div>
+                <div class="vc-meta">${fmtBytes(v.size)} &middot; ${dateStr}</div>
+                <div class="vc-actions">
+                    <button onclick="event.stopPropagation();downloadVaultFile(${idx})" title="Download">&#x2B07;</button>
+                    <button onclick="event.stopPropagation();vaultMoveFile(${idx})" title="Move">&#x21C4;</button>
+                    <button onclick="event.stopPropagation();removeFromVault(${idx})" title="Delete">&#x2716;</button>
+                </div>
+            </div>
+        `;
+    });
+
+    grid.innerHTML = html;
+}
+
+function createVaultEmpty() {
+    const div = document.createElement('div');
+    div.className = 'vault-empty-state';
+    div.innerHTML = `
+        <div class="ve-icon">&#x1F4C1;</div>
+        <div class="ve-title">This folder is empty</div>
+        <div class="ve-sub">Import files or create subfolders to organize your vault.</div>
+    `;
+    return div;
+}
+
+function vaultNavigate(folderPath) {
+    vaultCurrentPath = folderPath;
+    renderVaultView();
+}
+
+// Vault input modal system — replaces prompt() which is blocked in Electron
+let _vaultInputCallback = null;
+
+function showVaultInput(title, sub, placeholder, defaultVal, btnText, callback) {
+    document.getElementById('vaultInputTitle').textContent = title;
+    document.getElementById('vaultInputSub').textContent = sub;
+    document.getElementById('vaultInputBtn').textContent = btnText;
+    const field = document.getElementById('vaultInputField');
+    field.placeholder = placeholder;
+    field.value = defaultVal || '';
+    _vaultInputCallback = callback;
+    document.getElementById('vaultInputModal').classList.add('open');
+    setTimeout(() => field.focus(), 100);
+}
+
+function submitVaultInput() {
+    const val = document.getElementById('vaultInputField').value.trim();
+    const cb = _vaultInputCallback;
+    _vaultInputCallback = null;
+    document.getElementById('vaultInputModal').classList.remove('open');
+    if (val && cb) cb(val);
+}
+
+function closeVaultInput(e) {
+    if (e && e.target !== document.getElementById('vaultInputModal')) return;
+    document.getElementById('vaultInputModal').classList.remove('open');
+    _vaultInputCallback = null;
+}
+
+function vaultCreateFolder() {
+    showVaultInput('New Folder', 'Enter a name for the new folder.', 'Folder name', '', 'Create', (name) => {
+        const clean = name.replace(/[\/\\:*?"<>|]/g, '_');
+        if (!clean) return;
+        const newPath = vaultCurrentPath === '/' ? '/' + clean : vaultCurrentPath + '/' + clean;
+        if (vaultFolders.includes(newPath)) {
+            toast('Folder already exists');
+            return;
+        }
+        vaultFolders.push(newPath);
+        saveVaultFolders();
+        renderVaultView();
+        renderVault();
+        toast('Created folder: ' + clean);
+        addAuditEntry('Vault folder created: ' + clean, 'success');
+    });
+}
+
+function vaultRenameFolder(folderPath) {
+    const oldName = getFolderName(folderPath);
+    showVaultInput('Rename Folder', 'Enter a new name for "' + oldName + '".', 'Folder name', oldName, 'Rename', (newName) => {
+        if (newName === oldName) return;
+        const clean = newName.replace(/[\/\\:*?"<>|]/g, '_');
+        if (!clean) return;
+        const parentPath = folderPath.substring(0, folderPath.lastIndexOf('/')) || '/';
+        const newPath = parentPath === '/' ? '/' + clean : parentPath + '/' + clean;
+
+        if (vaultFolders.includes(newPath)) { toast('A folder with that name already exists'); return; }
+
+        const oldPrefix = folderPath;
+        const newPrefix = newPath;
+        vaultFolders = vaultFolders.map(f => {
+            if (f === oldPrefix) return newPrefix;
+            if (f.startsWith(oldPrefix + '/')) return newPrefix + f.slice(oldPrefix.length);
+            return f;
+        });
+
+        vaultFiles.forEach(f => {
+            if (f.folder === oldPrefix) f.folder = newPrefix;
+            else if (f.folder && f.folder.startsWith(oldPrefix + '/')) {
+                f.folder = newPrefix + f.folder.slice(oldPrefix.length);
+            }
+        });
+
+        saveVaultFolders();
+        localStorage.setItem('omnimorf_vault', JSON.stringify(vaultFiles));
+        if (vaultCurrentPath === oldPrefix) vaultCurrentPath = newPrefix;
+        renderVaultView();
+        renderVault();
+        toast('Renamed to: ' + clean);
+    });
+}
+
+function vaultDeleteFolder(folderPath) {
+    const name = getFolderName(folderPath);
+    const filesInside = vaultFiles.filter(f => (f.folder || '/').startsWith(folderPath));
+    const msg = filesInside.length > 0
+        ? 'Type DELETE to confirm removing "' + name + '" and its ' + filesInside.length + ' file(s).'
+        : 'Type DELETE to confirm removing "' + name + '".';
+    showVaultInput('Delete Folder', msg, 'Type DELETE', '', 'Delete', (val) => {
+        if (val !== 'DELETE') { toast('Deletion cancelled — type DELETE to confirm'); return; }
+
+        vaultFolders = vaultFolders.filter(f => f !== folderPath && !f.startsWith(folderPath + '/'));
+        vaultFiles = vaultFiles.filter(f => {
+            const ff = f.folder || '/';
+            return ff !== folderPath && !ff.startsWith(folderPath + '/');
+        });
+
+        saveVaultFolders();
+        localStorage.setItem('omnimorf_vault', JSON.stringify(vaultFiles));
+        if (vaultCurrentPath.startsWith(folderPath)) vaultCurrentPath = '/';
+        renderVaultView();
+        renderVault();
+        toast('Deleted folder: ' + name);
+        addAuditEntry('Vault folder deleted: ' + name + (filesInside.length ? ` (${filesInside.length} files)` : ''), 'success');
+    });
+}
+
+function vaultMoveFile(fileIdx) {
+    const file = vaultFiles[fileIdx];
+    if (!file) return;
+    const folders = vaultFolders.filter(f => f !== (file.folder || '/'));
+    if (folders.length === 0) { toast('Create a folder first'); return; }
+    const folderList = folders.map((f, i) => `${i + 1}. ${f === '/' ? '/ (Root)' : f}`).join(', ');
+    showVaultInput('Move File', 'Move "' + file.name + '" — enter the number: ' + folderList, 'Folder number', '', 'Move', (choice) => {
+        const idx = parseInt(choice) - 1;
+        if (isNaN(idx) || idx < 0 || idx >= folders.length) { toast('Invalid selection'); return; }
+        file.folder = folders[idx];
+        localStorage.setItem('omnimorf_vault', JSON.stringify(vaultFiles));
+        renderVaultView();
+        renderVault();
+        toast('Moved: ' + file.name + ' → ' + folders[idx]);
+        addAuditEntry('Vault moved: ' + file.name + ' → ' + folders[idx], 'success');
+    });
+}
+
+function vaultImportFile() {
+    document.getElementById('vaultFileInput').click();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const vaultInput = document.getElementById('vaultFileInput');
+    if (vaultInput) {
+        vaultInput.addEventListener('change', async (e) => {
+            const importFiles = Array.from(e.target.files);
+            if (!importFiles.length) return;
+            if (tierVaultSize() === 0) { showUpgradeModal('vault'); return; }
+
+            for (const f of importFiles) {
+                const reader = new FileReader();
+                await new Promise((resolve) => {
+                    reader.onload = () => {
+                        vaultFiles.push({
+                            name: f.name,
+                            size: f.size,
+                            type: f.type || 'application/octet-stream',
+                            data: reader.result,
+                            savedAt: new Date().toISOString(),
+                            hash: null,
+                            folder: vaultCurrentPath,
+                        });
+                        resolve();
+                    };
+                    reader.readAsDataURL(f);
+                });
+            }
+
+            try {
+                localStorage.setItem('omnimorf_vault', JSON.stringify(vaultFiles));
+            } catch (err) {
+                // Undo additions if storage full
+                vaultFiles.splice(vaultFiles.length - importFiles.length, importFiles.length);
+                toast('Vault full — storage limit reached');
+                e.target.value = '';
+                return;
+            }
+            renderVaultView();
+            renderVault();
+            toast(`Imported ${importFiles.length} file(s) to vault`);
+            addAuditEntry(`Vault imported: ${importFiles.length} file(s) to ${vaultCurrentPath}`, 'success');
+            e.target.value = '';
+        });
+    }
+});
 
 // ── AUDIT LOG ────────────────────────────────────────────────
 function addAuditEntry(action, type) {
@@ -1838,7 +2334,16 @@ if (!localStorage.getItem('omnimorf_admin') && document.cookie.includes('omnimor
 // ── ELECTRON INTEGRATION ─────────────────────────────────────
 if (window.electronAPI) {
     window.electronAPI.onOpenFiles(fileDataArray => {
-        const fileObjects = fileDataArray.map(f => new File([f.buffer], f.name, { type: 'application/octet-stream' }));
+        const fileObjects = fileDataArray.map(f => {
+            // Large files arrive with buffer=null and filePath set
+            const file = f.buffer
+                ? new File([f.buffer], f.name, { type: 'application/octet-stream' })
+                : new File([], f.name, { type: 'application/octet-stream' });
+            // Attach native path + real size for path-based conversion
+            file._nativePath = f.filePath || null;
+            if (!f.buffer && f.size) Object.defineProperty(file, 'size', { value: f.size });
+            return file;
+        });
         if (fileObjects.length) processFiles(fileObjects);
     });
 }
