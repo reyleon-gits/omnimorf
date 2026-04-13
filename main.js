@@ -1511,13 +1511,7 @@ function buildMenu() {
                 { role: 'zoomOut' },
                 { role: 'resetZoom' },
                 { type: 'separator' },
-                { role: 'togglefullscreen' },
-                { type: 'separator' },
-                {
-                    label: 'Developer Tools',
-                    accelerator: isMac ? 'Alt+Cmd+I' : 'Ctrl+Shift+I',
-                    click: (_, win) => win?.webContents.toggleDevTools()
-                }
+                { role: 'togglefullscreen' }
             ]
         },
 
