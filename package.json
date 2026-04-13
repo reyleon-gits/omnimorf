@@ -1,6 +1,6 @@
 {
   "name": "omnimorf",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "description": "Universal file converter — 1000+ formats, 100% local, offline, cross-platform",
   "main": "main.js",
   "author": "Blanton Banks II <support@omnimorf.com>",
@@ -219,7 +219,8 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Omnimorf"
+      "shortcutName": "Omnimorf",
+      "artifactName": "${productName}-Setup-${version}.${ext}"
     },
     "publish": {
       "provider": "github",
