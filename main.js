@@ -346,6 +346,54 @@ app.on('second-instance', (event, argv) => {
 autoUpdater.autoDownload = false;
 autoUpdater.autoInstallOnAppQuit = true;
 
+let updateProgressWindow = null;
+
+function showUpdateProgress() {
+    if (updateProgressWindow) return;
+    updateProgressWindow = new BrowserWindow({
+        width: 400, height: 160, resizable: false, minimizable: false,
+        maximizable: false, closable: false, frame: false,
+        alwaysOnTop: true, skipTaskbar: true,
+        webPreferences: { nodeIntegration: false, contextIsolation: true },
+        parent: mainWindow || undefined, modal: !!mainWindow,
+    });
+    updateProgressWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(`
+        <!DOCTYPE html><html><head><style>
+        body { margin:0; padding:24px; font-family:-apple-system,Segoe UI,sans-serif;
+               background:#1a1a2e; color:#e0e0e0; display:flex; flex-direction:column;
+               justify-content:center; -webkit-app-region:drag; }
+        h3 { margin:0 0 12px; font-size:15px; color:#fff; }
+        .bar-bg { width:100%; height:18px; background:#2a2a3e; border-radius:9px; overflow:hidden; }
+        .bar-fill { height:100%; width:0%; background:linear-gradient(90deg,#e63946,#ff6b6b);
+                    border-radius:9px; transition:width 0.3s; }
+        .status { margin-top:10px; font-size:12px; color:#999; }
+        </style></head><body>
+        <h3>Downloading update…</h3>
+        <div class="bar-bg"><div class="bar-fill" id="bar"></div></div>
+        <div class="status" id="status">Starting download…</div>
+        </body></html>
+    `));
+}
+
+function updateProgress(pct, speed, transferred, total) {
+    if (!updateProgressWindow || updateProgressWindow.isDestroyed()) return;
+    const mbT = (transferred / 1024 / 1024).toFixed(1);
+    const mbTotal = (total / 1024 / 1024).toFixed(1);
+    const mbps = (speed / 1024 / 1024).toFixed(1);
+    const statusText = `${mbT} / ${mbTotal} MB  •  ${mbps} MB/s`;
+    updateProgressWindow.webContents.executeJavaScript(
+        `document.getElementById('bar').style.width='${Math.round(pct)}%';` +
+        `document.getElementById('status').textContent='${statusText}';`
+    ).catch(() => {});
+}
+
+function closeUpdateProgress() {
+    if (updateProgressWindow && !updateProgressWindow.isDestroyed()) {
+        updateProgressWindow.destroy();
+    }
+    updateProgressWindow = null;
+}
+
 autoUpdater.on('update-available', (info) => {
     if (!mainWindow) return;
     dialog.showMessageBox(mainWindow, {
@@ -356,11 +404,28 @@ autoUpdater.on('update-available', (info) => {
         buttons: ['Download', 'Later'],
         defaultId: 0
     }).then(({ response }) => {
-        if (response === 0) autoUpdater.downloadUpdate();
+        if (response === 0) {
+            showUpdateProgress();
+            autoUpdater.downloadUpdate().catch((err) => {
+                closeUpdateProgress();
+                dialog.showMessageBox(mainWindow, {
+                    type: 'error',
+                    title: 'Download Failed',
+                    message: 'Could not download update.',
+                    detail: err.message || 'Please check your internet connection and try again.',
+                    buttons: ['OK']
+                });
+            });
+        }
     });
 });
 
+autoUpdater.on('download-progress', (progress) => {
+    updateProgress(progress.percent, progress.bytesPerSecond, progress.transferred, progress.total);
+});
+
 autoUpdater.on('update-downloaded', () => {
+    closeUpdateProgress();
     if (!mainWindow) return;
     dialog.showMessageBox(mainWindow, {
         type: 'info',
@@ -375,7 +440,17 @@ autoUpdater.on('update-downloaded', () => {
 });
 
 autoUpdater.on('error', (err) => {
+    closeUpdateProgress();
     console.log('[Omnimorf Updater] Error:', err.message);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        dialog.showMessageBox(mainWindow, {
+            type: 'error',
+            title: 'Update Error',
+            message: 'Something went wrong with the update.',
+            detail: err.message || 'Please try again later or download manually from omnimorf.com.',
+            buttons: ['OK']
+        });
+    }
 });
 
 // ── App ready ────────────────────────────────────────────────
