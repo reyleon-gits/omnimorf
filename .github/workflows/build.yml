@@ -179,7 +179,14 @@ jobs:
           echo "Generated assets/icon.icns"
 
       - name: Build macOS (DMG + ZIP — x64 + arm64)
-        run: npm run build:mac
+        run: |
+          # hdiutil is flaky on CI — retry up to 3 times
+          for i in 1 2 3; do
+            echo "=== Attempt $i ==="
+            npm run build:mac && break
+            echo "Build failed on attempt $i"
+            [ $i -lt 3 ] && sleep 10 && rm -rf dist/
+          done
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: false
