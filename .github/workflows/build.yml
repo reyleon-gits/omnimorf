@@ -77,20 +77,22 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Stable filenames
+      - name: Collect release assets
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist/release | Out-Null
-          Get-ChildItem -Path dist -Filter "*Setup*.exe" | ForEach-Object { Copy-Item $_.FullName "dist/release/Omnimorf-Setup-Windows.exe" -Force }
+          # Copy original-named installer (electron-updater needs this exact name from latest.yml)
+          Get-ChildItem -Path dist -Filter "*.exe" | ForEach-Object { Copy-Item $_.FullName "dist/release/$($_.Name)" -Force }
+          # Also copy a friendly-named version for the release page
+          Get-ChildItem -Path dist -Filter "*Setup*.exe" | Select-Object -First 1 | ForEach-Object { Copy-Item $_.FullName "dist/release/Omnimorf-Setup-Windows.exe" -Force }
           # Auto-update metadata
           if (Test-Path "dist/latest.yml") { Copy-Item "dist/latest.yml" "dist/release/latest.yml" }
+          Get-ChildItem -Path dist/release | ForEach-Object { Write-Host "$($_.Name) — $([math]::Round($_.Length / 1MB, 1)) MB" }
 
       - uses: actions/upload-artifact@v4
         with:
           name: omnimorf-windows
-          path: |
-            dist/release/*.exe
-            dist/release/latest.yml
+          path: dist/release/*
 
   # ══════════════════════════════════════════════════════════════
   #  MACOS BUILD
@@ -195,9 +197,13 @@ jobs:
         run: |
           find dist -name "*.app" -type d -exec codesign --force --deep --sign - {} \; || true
 
-      - name: Stable filenames
+      - name: Collect release assets
         run: |
           mkdir -p dist/release
+          # Copy original-named files (electron-updater needs these exact names from latest-mac.yml)
+          cp dist/*.dmg dist/release/ 2>/dev/null || true
+          cp dist/*.zip dist/release/ 2>/dev/null || true
+          # Also copy friendly-named versions for the release page
           for f in dist/*.dmg; do
             if [[ "$f" == *"arm64"* ]]; then cp "$f" "dist/release/Omnimorf-macOS-AppleSilicon.dmg"
             else cp "$f" "dist/release/Omnimorf-macOS-Intel.dmg"
@@ -208,16 +214,13 @@ jobs:
             else cp "$f" "dist/release/Omnimorf-macOS-Intel.zip"
             fi
           done
-          # Auto-update metadata (electron-updater reads these from GitHub Releases)
           cp dist/latest-mac.yml dist/release/ 2>/dev/null || true
+          ls -lh dist/release/
 
       - uses: actions/upload-artifact@v4
         with:
           name: omnimorf-macos
-          path: |
-            dist/release/*.dmg
-            dist/release/*.zip
-            dist/release/latest-mac.yml
+          path: dist/release/*
 
   # ══════════════════════════════════════════════════════════════
   #  LINUX BUILD
@@ -297,13 +300,17 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Stable filenames
+      - name: Collect release assets
         run: |
           mkdir -p dist/release
+          # Copy original-named files (electron-updater needs these exact names from latest-linux.yml)
+          cp dist/*.AppImage dist/release/ 2>/dev/null || true
+          cp dist/*.deb dist/release/ 2>/dev/null || true
+          # Also copy friendly-named versions for the release page
           for f in dist/*.AppImage; do cp "$f" "dist/release/Omnimorf-Linux.AppImage"; done
           for f in dist/*.deb; do cp "$f" "dist/release/Omnimorf-Linux.deb"; done
-          # Auto-update metadata
           cp dist/latest-linux.yml dist/release/ 2>/dev/null || true
+          ls -lh dist/release/
 
       - uses: actions/upload-artifact@v4
         with:
