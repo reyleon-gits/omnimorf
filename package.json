@@ -1,6 +1,6 @@
 {
   "name": "omnimorf",
-  "version": "1.2.4",
+  "version": "1.2.5",
   "description": "Universal file converter — 1000+ formats, 100% local, offline, cross-platform",
   "main": "main.js",
   "author": "Blanton Banks II <support@omnimorf.com>",

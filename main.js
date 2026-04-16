@@ -35,10 +35,10 @@ const { marked } = require('marked');
 const POLAR_ORG_ID = '8f6465a8-d819-475d-809e-ac034a76b3df';
 const POLAR_API_BASE = 'https://api.polar.sh/v1';
 
-// Organization Access Token from Polar.sh
-// Create at: Polar.sh dashboard → Settings → Developers → New Token
-// Required scopes: license_keys:read, license_keys:write
-const POLAR_ACCESS_TOKEN = 'polar_oat_Fh1qijibnQvNY3zvs0ltDnUW5cBT9IcsmrR9y2tdBPY';
+// NOTE: No access token is needed in the client.
+// We use Polar's public customer-portal endpoints
+// (/v1/customer-portal/license-keys/...) which are designed for client apps
+// and require no authentication. The org token must NEVER live in client code.
 
 // Map Polar product IDs → tier name
 // (Kept for fallback / future API changes — Polar currently does NOT
@@ -133,7 +133,9 @@ function findTierInResponse(obj, productMap, path = '') {
     return null;
 }
 
-// Promise wrapper for HTTPS POST
+// Promise wrapper for HTTPS POST against Polar's public customer-portal API.
+// These endpoints accept a license key + organization_id without an auth token,
+// which is exactly what a distributed client app needs.
 function polarPost(endpoint, body) {
     return new Promise((resolve, reject) => {
         const data = JSON.stringify(body);
@@ -142,13 +144,10 @@ function polarPost(endpoint, body) {
             'Content-Length': Buffer.byteLength(data),
             'Accept': 'application/json'
         };
-        if (POLAR_ACCESS_TOKEN && POLAR_ACCESS_TOKEN !== 'REPLACE_WITH_YOUR_POLAR_ACCESS_TOKEN') {
-            headers['Authorization'] = 'Bearer ' + POLAR_ACCESS_TOKEN;
-        }
         const req = https.request({
             hostname: 'api.polar.sh',
             port: 443,
-            path: '/v1' + endpoint,
+            path: '/v1/customer-portal' + endpoint,
             method: 'POST',
             headers
         }, res => {
@@ -1376,9 +1375,6 @@ ipcMain.handle('omnimorf:license-activate', async (event, { key }) => {
     }
     if (POLAR_ORG_ID === 'REPLACE_WITH_YOUR_POLAR_ORG_UUID') {
         return { ok: false, error: 'License system not configured (missing org ID)' };
-    }
-    if (POLAR_ACCESS_TOKEN === 'REPLACE_WITH_YOUR_POLAR_ACCESS_TOKEN') {
-        return { ok: false, error: 'License system not configured (missing access token)' };
     }
 
     try {
