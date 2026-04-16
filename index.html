@@ -615,6 +615,7 @@
         <div class="vault-toolbar">
             <button class="btn-vault primary" onclick="vaultCreateFolder()">+ New Folder</button>
             <button class="btn-vault" onclick="vaultImportFile()">&#x2B06; Import File</button>
+            <button class="btn-vault" id="vaultLocationBtn" onclick="vaultChooseLocation()" style="display:none">&#x1F4C1; Vault Location</button>
             <input type="file" id="vaultFileInput" multiple style="display:none">
             <div class="vault-breadcrumb" id="vaultBreadcrumb">
                 <span onclick="vaultNavigate('/')">Vault</span>
@@ -624,7 +625,12 @@
             <div class="vs-item"><span class="vs-num" id="vaultFileCount">0</span> files</div>
             <div class="vs-item"><span class="vs-num" id="vaultFolderCount">0</span> folders</div>
             <div class="vs-item"><span class="vs-num" id="vaultTotalSize">0 B</span> / <span id="vaultMaxSize">5 GB</span></div>
+            <div class="vs-item" id="vaultSavingsItem" style="display:none"><span class="vs-num" id="vaultSavings">0 B</span> saved</div>
             <div class="vault-meter-full"><div class="vmf-fill" id="vaultMeterFull" style="width:0%"></div></div>
+        </div>
+        <div id="vaultLocationInfo" style="display:none;font-size:0.7rem;color:var(--muted);padding:0.5rem 0;">
+            <span id="vaultLocationPath"></span>
+            <button class="btn-sm" onclick="vaultResetLocation()" style="margin-left:0.75rem;font-size:0.6rem;padding:2px 6px;">Reset to Default</button>
         </div>
         <div class="vault-grid" id="vaultGrid">
             <div class="vault-empty-state" id="vaultEmptyState">
@@ -1064,8 +1070,37 @@ let quality = 0.85;
 let options = { smartMode: false, stripMeta: false, hashVerify: false };
 let files = [];
 let uid = 0;
-let vaultFiles = JSON.parse(localStorage.getItem('omnimorf_vault') || '[]');
+// Vault storage backend: IPC in Electron (compressed+deduped on disk), localStorage in web.
+const isElectronVault = !!window.electronAPI && typeof window.electronAPI.vaultList === 'function';
+let vaultFiles = isElectronVault ? [] : JSON.parse(localStorage.getItem('omnimorf_vault') || '[]');
+let vaultStatsCache = null; // Populated in Electron mode from vault-stats IPC
 let auditLog = JSON.parse(localStorage.getItem('omnimorf_audit') || '[]');
+
+async function loadVault() {
+    if (!isElectronVault) {
+        vaultFiles = JSON.parse(localStorage.getItem('omnimorf_vault') || '[]');
+        vaultFiles.forEach(f => { if (!f.folder) f.folder = '/'; });
+        return;
+    }
+    try {
+        const list = await window.electronAPI.vaultList();
+        vaultFiles = list.map(e => ({
+            _id: e.id,
+            name: e.name,
+            size: e.originalSize || e.size || 0,
+            savedAt: e.savedAt,
+            hash: e.hash || e.contentHash || null,
+            folder: e.folder || '/',
+            _contentHash: e.contentHash || null,
+            _compressedSize: e.compressedSize || 0,
+            _encryptedSize: e.encryptedSize || 0,
+        }));
+        try { vaultStatsCache = await window.electronAPI.vaultStats(); } catch {}
+    } catch (e) {
+        console.error('Vault list failed:', e);
+        vaultFiles = [];
+    }
+}
 
 // ── CATEGORY SWITCHING ───────────────────────────────────────
 function setCategory(cat) {
@@ -1616,14 +1651,44 @@ function closeRename(e) {
 }
 
 // ── VAULT ────────────────────────────────────────────────────
-function saveToVault(id) {
+async function saveToVault(id) {
     const entry = files.find(f => f.id === id);
     if (!entry?.blob) { toast('Convert file first'); return; }
     if (tierVaultSize() === 0) { showUpgradeModal('vault'); return; }
 
+    const name = (entry.renamed || baseName(entry.file.name)) + '.' + entry.outputFmt.ext;
+
+    // Electron path — encrypted, gzipped, deduplicated on disk
+    if (isElectronVault) {
+        try {
+            const buffer = await entry.blob.arrayBuffer();
+            const r = await window.electronAPI.vaultSave({
+                name,
+                buffer,
+                hash: entry.hash || null,
+                folder: vaultCurrentPath || '/',
+            });
+            await loadVault();
+            renderVault();
+            if (activeCat === 'vault') renderVaultView();
+            if (r.dedupHit) {
+                toast('Saved (dedup — 0 bytes added): ' + name);
+                addAuditEntry('Vault saved [DEDUP]: ' + name + ' (' + fmtBytes(entry.blob.size) + ' → 0 B added)', 'success');
+            } else {
+                const saved = entry.blob.size - (r.compressedSize || entry.blob.size);
+                toast('Saved to vault: ' + name);
+                addAuditEntry('Vault saved: ' + name + ' (' + fmtBytes(entry.blob.size) + ' → ' + fmtBytes(r.encryptedSize || 0) + ' encrypted)', 'success');
+            }
+        } catch (e) {
+            toast('Vault save failed: ' + (e.message || e));
+            addAuditEntry('Vault save FAILED: ' + name + ' — ' + (e.message || e), 'error');
+        }
+        return;
+    }
+
+    // Web / localStorage path
     const reader = new FileReader();
     reader.onload = () => {
-        const name = (entry.renamed || baseName(entry.file.name)) + '.' + entry.outputFmt.ext;
         const item = {
             name, size: entry.blob.size,
             type: entry.outputFmt.value,
@@ -1676,19 +1741,51 @@ function renderVault() {
     document.getElementById('vaultUsage').textContent = fmtBytes(totalBytes) + ' / ' + (maxBytes < 0 ? 'Unlimited' : fmtBytes(maxBytes));
 }
 
-function downloadVaultFile(i) {
+async function downloadVaultFile(i) {
     const v = vaultFiles[i];
     if (!v) return;
+
+    // Electron path — fetch decrypted+decompressed buffer from IPC
+    if (isElectronVault && v._id) {
+        try {
+            const r = await window.electronAPI.vaultLoad({ id: v._id });
+            const blob = new Blob([r.buffer]);
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = r.name || v.name;
+            a.click();
+            setTimeout(() => URL.revokeObjectURL(url), 2000);
+        } catch (e) {
+            toast('Download failed: ' + (e.message || e));
+        }
+        return;
+    }
+
+    // Web path — data URL stored inline
     const a = document.createElement('a');
     a.href = v.data;
     a.download = v.name;
     a.click();
 }
 
-function removeFromVault(i) {
-    const name = vaultFiles[i]?.name;
-    vaultFiles.splice(i, 1);
-    localStorage.setItem('omnimorf_vault', JSON.stringify(vaultFiles));
+async function removeFromVault(i) {
+    const v = vaultFiles[i];
+    if (!v) return;
+    const name = v.name;
+
+    if (isElectronVault && v._id) {
+        try {
+            await window.electronAPI.vaultDelete({ id: v._id });
+            await loadVault();
+        } catch (e) {
+            toast('Delete failed: ' + (e.message || e));
+            return;
+        }
+    } else {
+        vaultFiles.splice(i, 1);
+        localStorage.setItem('omnimorf_vault', JSON.stringify(vaultFiles));
+    }
     renderVault();
     if (activeCat === 'vault') renderVaultView();
     toast('Removed from vault: ' + name);
@@ -1761,7 +1858,9 @@ function renderVaultView() {
     // Stats
     const totalFiles = vaultFiles.length;
     const totalFolders = vaultFolders.length - 1; // exclude root
-    const totalBytes = vaultFiles.reduce((sum, v) => sum + v.size, 0);
+    // In Electron mode, "total" is what the user stored logically, but on-disk is much smaller
+    // after compression + dedup. Show the logical size against tier limit so the tier promise holds.
+    const totalBytes = vaultFiles.reduce((sum, v) => sum + (v.size || 0), 0);
     const maxBytes = tierVaultSize();
     document.getElementById('vaultFileCount').textContent = totalFiles;
     document.getElementById('vaultFolderCount').textContent = totalFolders;
@@ -1769,6 +1868,20 @@ function renderVaultView() {
     document.getElementById('vaultMaxSize').textContent = maxBytes < 0 ? 'Unlimited' : fmtBytes(maxBytes);
     const pct = maxBytes > 0 ? Math.min(100, (totalBytes / maxBytes) * 100) : 0;
     document.getElementById('vaultMeterFull').style.width = pct + '%';
+
+    // Compression + dedup savings (Electron only)
+    const savingsItem = document.getElementById('vaultSavingsItem');
+    if (isElectronVault && vaultStatsCache && savingsItem) {
+        const saved = (vaultStatsCache.originalTotal || 0) - (vaultStatsCache.storedTotal || 0) + (vaultStatsCache.dedupSavings || 0);
+        if (saved > 0) {
+            savingsItem.style.display = '';
+            document.getElementById('vaultSavings').textContent = fmtBytes(saved);
+        } else {
+            savingsItem.style.display = 'none';
+        }
+    } else if (savingsItem) {
+        savingsItem.style.display = 'none';
+    }
 
     if (subfolders.length === 0 && items.length === 0) {
         grid.innerHTML = '';
@@ -1945,20 +2058,101 @@ function vaultMoveFile(fileIdx) {
     const folders = vaultFolders.filter(f => f !== (file.folder || '/'));
     if (folders.length === 0) { toast('Create a folder first'); return; }
     const folderList = folders.map((f, i) => `${i + 1}. ${f === '/' ? '/ (Root)' : f}`).join(', ');
-    showVaultInput('Move File', 'Move "' + file.name + '" — enter the number: ' + folderList, 'Folder number', '', 'Move', (choice) => {
+    showVaultInput('Move File', 'Move "' + file.name + '" — enter the number: ' + folderList, 'Folder number', '', 'Move', async (choice) => {
         const idx = parseInt(choice) - 1;
         if (isNaN(idx) || idx < 0 || idx >= folders.length) { toast('Invalid selection'); return; }
-        file.folder = folders[idx];
-        localStorage.setItem('omnimorf_vault', JSON.stringify(vaultFiles));
+        const newFolder = folders[idx];
+
+        if (isElectronVault && file._id && window.electronAPI.vaultUpdateEntry) {
+            try {
+                await window.electronAPI.vaultUpdateEntry({ id: file._id, folder: newFolder });
+                await loadVault();
+            } catch (e) {
+                toast('Move failed: ' + (e.message || e));
+                return;
+            }
+        } else {
+            file.folder = newFolder;
+            localStorage.setItem('omnimorf_vault', JSON.stringify(vaultFiles));
+        }
+
         renderVaultView();
         renderVault();
-        toast('Moved: ' + file.name + ' → ' + folders[idx]);
-        addAuditEntry('Vault moved: ' + file.name + ' → ' + folders[idx], 'success');
+        toast('Moved: ' + file.name + ' → ' + newFolder);
+        addAuditEntry('Vault moved: ' + file.name + ' → ' + newFolder, 'success');
     });
 }
 
 function vaultImportFile() {
     document.getElementById('vaultFileInput').click();
+}
+
+// ── Vault Location (Electron only) ──────────────────────────
+async function initVaultLocationUI() {
+    if (!isElectronVault || !window.electronAPI.vaultGetLocation) return;
+    const btn = document.getElementById('vaultLocationBtn');
+    if (btn) btn.style.display = '';
+    try {
+        const loc = await window.electronAPI.vaultGetLocation();
+        const info = document.getElementById('vaultLocationInfo');
+        const pathEl = document.getElementById('vaultLocationPath');
+        if (info && pathEl) {
+            if (!loc.isDefault) {
+                info.style.display = '';
+                const tag = loc.isNetwork ? '&#x1F310; Network Vault' : '&#x1F4C1; Custom Vault';
+                pathEl.innerHTML = `${tag}: <code>${loc.active}</code>`;
+            } else {
+                info.style.display = 'none';
+            }
+        }
+    } catch (e) {
+        console.error('vaultGetLocation failed:', e);
+    }
+}
+
+async function vaultChooseLocation() {
+    if (!isElectronVault) return;
+    try {
+        const pick = await window.electronAPI.vaultPickLocation();
+        if (pick.canceled) return;
+
+        const tier = (typeof currentTier === 'string') ? currentTier : 'free';
+        const r = await window.electronAPI.vaultSetLocation({
+            location: pick.path,
+            tier,
+        });
+        if (!r.ok) {
+            if (r.upgrade) {
+                showUpgradeModal && showUpgradeModal('vault');
+            }
+            toast(r.error || 'Could not set vault location');
+            return;
+        }
+        toast('Vault location updated' + (r.isNetwork ? ' (Network)' : ''));
+        addAuditEntry('Vault location set: ' + r.active, 'success');
+        await loadVault();
+        renderVault();
+        if (activeCat === 'vault') renderVaultView();
+        initVaultLocationUI();
+    } catch (e) {
+        toast('Location change failed: ' + (e.message || e));
+    }
+}
+
+async function vaultResetLocation() {
+    if (!isElectronVault) return;
+    if (!confirm('Reset vault location to the default (app data folder)? Your existing files stay where they are; only the active location changes.')) return;
+    try {
+        await window.electronAPI.vaultResetLocation();
+        toast('Vault location reset to default');
+        addAuditEntry('Vault location reset to default', 'success');
+        await loadVault();
+        renderVault();
+        if (activeCat === 'vault') renderVaultView();
+        initVaultLocationUI();
+    } catch (e) {
+        toast('Reset failed: ' + (e.message || e));
+    }
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -1969,6 +2163,33 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!importFiles.length) return;
             if (tierVaultSize() === 0) { showUpgradeModal('vault'); return; }
 
+            // Electron path — stream each file to IPC with compression + dedup
+            if (isElectronVault) {
+                let dedupCount = 0;
+                for (const f of importFiles) {
+                    try {
+                        const buffer = await f.arrayBuffer();
+                        const r = await window.electronAPI.vaultSave({
+                            name: f.name,
+                            buffer,
+                            folder: vaultCurrentPath,
+                        });
+                        if (r.dedupHit) dedupCount++;
+                    } catch (err) {
+                        toast('Import failed: ' + f.name + ' — ' + (err.message || err));
+                    }
+                }
+                await loadVault();
+                renderVaultView();
+                renderVault();
+                const dedupMsg = dedupCount > 0 ? ` (${dedupCount} deduplicated)` : '';
+                toast(`Imported ${importFiles.length} file(s) to vault${dedupMsg}`);
+                addAuditEntry(`Vault imported: ${importFiles.length} file(s) to ${vaultCurrentPath}${dedupMsg}`, 'success');
+                e.target.value = '';
+                return;
+            }
+
+            // Web / localStorage path
             for (const f of importFiles) {
                 const reader = new FileReader();
                 await new Promise((resolve) => {
@@ -2003,6 +2224,14 @@ document.addEventListener('DOMContentLoaded', () => {
             addAuditEntry(`Vault imported: ${importFiles.length} file(s) to ${vaultCurrentPath}`, 'success');
             e.target.value = '';
         });
+    }
+
+    // Electron vault bootstrap — load IPC-backed vault list on startup
+    if (isElectronVault) {
+        loadVault().then(() => {
+            renderVault();
+            initVaultLocationUI();
+        }).catch(err => console.error('Vault bootstrap failed:', err));
     }
 });
 

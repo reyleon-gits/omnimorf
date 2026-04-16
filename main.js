@@ -20,6 +20,7 @@ const fs   = require('fs');
 const os   = require('os');
 const https = require('https');
 const crypto = require('crypto');
+const zlib = require('zlib');
 const { execFile, execSync } = require('child_process');
 const { autoUpdater } = require('electron-updater');
 const Tesseract = require('tesseract.js');
@@ -273,12 +274,61 @@ function findLibreOffice() {
 }
 
 // ── Vault directory ──────────────────────────────────────────
-const VAULT_DIR = path.join(app.getPath('userData'), 'vault');
-const VAULT_INDEX = path.join(VAULT_DIR, 'vault-index.json');
+// ── Settings (vault location override, etc.) ────────────────
+const SETTINGS_FILE = path.join(app.getPath('userData'), 'omnimorf-settings.json');
+const DEFAULT_VAULT_DIR = path.join(app.getPath('userData'), 'vault');
+
+function readSettings() {
+    try { return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')); }
+    catch { return {}; }
+}
+function writeSettings(s) {
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(s, null, 2));
+}
+
+// Current vault directory: custom (if set and reachable) else default.
+// If the user previously configured a custom path (e.g. USB drive / NAS) and
+// it's not reachable right now, fall back to default so the app stays usable.
+function getVaultDir() {
+    const s = readSettings();
+    if (s.vaultLocation) {
+        try {
+            fs.accessSync(s.vaultLocation, fs.constants.W_OK);
+            return s.vaultLocation;
+        } catch {
+            return DEFAULT_VAULT_DIR;
+        }
+    }
+    return DEFAULT_VAULT_DIR;
+}
+function getVaultIndexPath() { return path.join(getVaultDir(), 'vault-index.json'); }
+function getVaultBlobDir()   { return path.join(getVaultDir(), 'blobs'); }
+function getDedupMapPath()   { return path.join(getVaultDir(), 'dedup-map.json'); }
+
+// Detect network-style paths (UNC shares, smb://, nfs://, cifs://)
+// Used to gate the LAN / Network Vault feature to Team+ tiers.
+function isNetworkPath(p) {
+    if (!p || typeof p !== 'string') return false;
+    if (p.startsWith('\\\\')) return true;                  // Windows UNC
+    if (/^(smb|nfs|cifs):\/\//i.test(p)) return true;       // URI-style mounts
+    return false;
+}
 
 function ensureVaultDir() {
-    if (!fs.existsSync(VAULT_DIR)) fs.mkdirSync(VAULT_DIR, { recursive: true });
-    if (!fs.existsSync(VAULT_INDEX)) fs.writeFileSync(VAULT_INDEX, '[]');
+    const dir = getVaultDir();
+    const idx = getVaultIndexPath();
+    const blobs = getVaultBlobDir();
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    if (!fs.existsSync(blobs)) fs.mkdirSync(blobs, { recursive: true });
+    if (!fs.existsSync(idx)) fs.writeFileSync(idx, '[]');
+}
+
+function readDedupMap() {
+    try { return JSON.parse(fs.readFileSync(getDedupMapPath(), 'utf8')); }
+    catch { return {}; }
+}
+function writeDedupMap(m) {
+    fs.writeFileSync(getDedupMapPath(), JSON.stringify(m, null, 2));
 }
 
 // ── Create window ────────────────────────────────────────────
@@ -1283,58 +1333,268 @@ ipcMain.handle('omnimorf:check-libreoffice', async () => {
 });
 
 // ── IPC: Vault operations ────────────────────────────────────
-ipcMain.handle('omnimorf:vault-save', async (event, { name, buffer, hash, passphrase }) => {
+// v2 blob layout on disk:  [ salt (32B) | iv (16B) | aes-256-cbc( gzip( plaintext ) ) ]
+// Blob path:                {vaultDir}/blobs/{contentHash}
+// Dedup map:                { contentHash: refcount }
+// Index entry v2:           { id, name, contentHash, originalSize, compressedSize, encryptedSize,
+//                             hash, savedAt, version: 2, folder? }
+// Legacy v1 entries (id-addressed file at {vaultDir}/{id} with salt/iv stored inline) still load.
+
+ipcMain.handle('omnimorf:vault-save', async (event, { name, buffer, hash, passphrase, folder }) => {
     ensureVaultDir();
+    const plaintext = Buffer.from(buffer);
+
+    // Content hash of PLAINTEXT — this is the dedup key
+    const contentHash = (hash && /^[a-f0-9]{64}$/i.test(hash))
+        ? hash.toLowerCase()
+        : crypto.createHash('sha256').update(plaintext).digest('hex');
+
     const id = crypto.randomUUID();
-    const filePath = path.join(VAULT_DIR, id);
+    const blobDir = getVaultBlobDir();
+    const blobPath = path.join(blobDir, contentHash);
+    const dedupMap = readDedupMap();
 
-    // AES-256 encryption with random salt + IV per entry
-    const salt = crypto.randomBytes(32);
-    const key = crypto.scryptSync(passphrase || 'omnimorf-default', salt, 32);
-    const iv = crypto.randomBytes(16);
-    const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
-    const encrypted = Buffer.concat([cipher.update(Buffer.from(buffer)), cipher.final()]);
+    let dedupHit = false;
+    let compressedSize = 0;
+    let encryptedSize = 0;
 
-    fs.writeFileSync(filePath, encrypted);
+    if (dedupMap[contentHash] && fs.existsSync(blobPath)) {
+        // Identical content already in vault — just bump the refcount, no new bytes written
+        dedupMap[contentHash].refcount = (dedupMap[contentHash].refcount || 1) + 1;
+        compressedSize = dedupMap[contentHash].compressedSize || 0;
+        encryptedSize = dedupMap[contentHash].encryptedSize || 0;
+        dedupHit = true;
+    } else {
+        // New content — gzip, then AES-256-CBC with fresh salt+IV
+        const compressed = zlib.gzipSync(plaintext, { level: 9 });
+        compressedSize = compressed.length;
 
-    // Update index
-    const index = JSON.parse(fs.readFileSync(VAULT_INDEX, 'utf8'));
-    index.push({ id, name, size: buffer.byteLength, encryptedSize: encrypted.length, hash, iv: iv.toString('hex'), salt: salt.toString('hex'), savedAt: new Date().toISOString() });
-    fs.writeFileSync(VAULT_INDEX, JSON.stringify(index, null, 2));
+        const salt = crypto.randomBytes(32);
+        const key = crypto.scryptSync(passphrase || 'omnimorf-default', salt, 32);
+        const iv = crypto.randomBytes(16);
+        const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
+        const encrypted = Buffer.concat([cipher.update(compressed), cipher.final()]);
+        encryptedSize = encrypted.length;
 
-    return { id, encryptedSize: encrypted.length };
+        // Self-contained blob: salt + iv + ciphertext (no external metadata needed for decrypt)
+        const blob = Buffer.concat([salt, iv, encrypted]);
+        fs.writeFileSync(blobPath, blob);
+
+        dedupMap[contentHash] = {
+            refcount: 1,
+            compressedSize,
+            encryptedSize,
+            originalSize: plaintext.length,
+        };
+    }
+
+    writeDedupMap(dedupMap);
+
+    const index = JSON.parse(fs.readFileSync(getVaultIndexPath(), 'utf8'));
+    index.push({
+        id,
+        name,
+        contentHash,
+        originalSize: plaintext.length,
+        compressedSize,
+        encryptedSize,
+        hash: hash || contentHash,
+        savedAt: new Date().toISOString(),
+        folder: folder || '/',
+        version: 2,
+    });
+    fs.writeFileSync(getVaultIndexPath(), JSON.stringify(index, null, 2));
+
+    return {
+        id,
+        contentHash,
+        originalSize: plaintext.length,
+        compressedSize,
+        encryptedSize,
+        dedupHit,
+    };
 });
 
 ipcMain.handle('omnimorf:vault-load', async (event, { id, passphrase }) => {
-    const filePath = path.join(VAULT_DIR, id);
-    const index = JSON.parse(fs.readFileSync(VAULT_INDEX, 'utf8'));
+    ensureVaultDir();
+    const index = JSON.parse(fs.readFileSync(getVaultIndexPath(), 'utf8'));
     const entry = index.find(e => e.id === id);
     if (!entry) throw new Error('Vault entry not found');
 
-    // Use per-entry salt if available, fall back to legacy static salt for old entries
-    const salt = entry.salt ? Buffer.from(entry.salt, 'hex') : 'omnimorf-salt';
-    const key = crypto.scryptSync(passphrase || 'omnimorf-default', salt, 32);
+    const pass = passphrase || 'omnimorf-default';
+
+    // v2 path — content-addressed blob with embedded salt+iv, compressed plaintext
+    if (entry.version === 2 && entry.contentHash) {
+        const blobPath = path.join(getVaultBlobDir(), entry.contentHash);
+        const blob = fs.readFileSync(blobPath);
+        const salt      = blob.slice(0, 32);
+        const iv        = blob.slice(32, 48);
+        const encrypted = blob.slice(48);
+        const key = crypto.scryptSync(pass, salt, 32);
+        const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
+        const compressed = Buffer.concat([decipher.update(encrypted), decipher.final()]);
+        const plaintext = zlib.gunzipSync(compressed);
+        return {
+            buffer: plaintext.buffer.slice(plaintext.byteOffset, plaintext.byteOffset + plaintext.byteLength),
+            name: entry.name,
+        };
+    }
+
+    // v1 legacy path — id-addressed file, no compression, salt/iv on the index entry
+    const filePath = path.join(getVaultDir(), id);
+    const salt = entry.salt ? Buffer.from(entry.salt, 'hex') : Buffer.from('omnimorf-salt');
+    const key = crypto.scryptSync(pass, salt, 32);
     const iv = Buffer.from(entry.iv, 'hex');
     const encrypted = fs.readFileSync(filePath);
     const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
     const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
-
-    return { buffer: decrypted.buffer.slice(decrypted.byteOffset, decrypted.byteOffset + decrypted.byteLength), name: entry.name };
+    return {
+        buffer: decrypted.buffer.slice(decrypted.byteOffset, decrypted.byteOffset + decrypted.byteLength),
+        name: entry.name,
+    };
 });
 
 ipcMain.handle('omnimorf:vault-list', async () => {
     ensureVaultDir();
-    return JSON.parse(fs.readFileSync(VAULT_INDEX, 'utf8'));
+    return JSON.parse(fs.readFileSync(getVaultIndexPath(), 'utf8'));
 });
 
 ipcMain.handle('omnimorf:vault-delete', async (event, { id }) => {
-    const filePath = path.join(VAULT_DIR, id);
-    try { fs.unlinkSync(filePath); } catch {}
+    ensureVaultDir();
+    const index = JSON.parse(fs.readFileSync(getVaultIndexPath(), 'utf8'));
+    const entry = index.find(e => e.id === id);
+    if (!entry) return true;
 
-    const index = JSON.parse(fs.readFileSync(VAULT_INDEX, 'utf8'));
+    if (entry.version === 2 && entry.contentHash) {
+        // Decrement refcount — only delete the blob when no index entries reference it
+        const dedupMap = readDedupMap();
+        const rec = dedupMap[entry.contentHash];
+        if (rec) {
+            rec.refcount = (rec.refcount || 1) - 1;
+            if (rec.refcount <= 0) {
+                try { fs.unlinkSync(path.join(getVaultBlobDir(), entry.contentHash)); } catch {}
+                delete dedupMap[entry.contentHash];
+            } else {
+                dedupMap[entry.contentHash] = rec;
+            }
+            writeDedupMap(dedupMap);
+        }
+    } else {
+        // v1 legacy — delete the id-addressed file
+        try { fs.unlinkSync(path.join(getVaultDir(), id)); } catch {}
+    }
+
     const filtered = index.filter(e => e.id !== id);
-    fs.writeFileSync(VAULT_INDEX, JSON.stringify(filtered, null, 2));
+    fs.writeFileSync(getVaultIndexPath(), JSON.stringify(filtered, null, 2));
     return true;
+});
+
+// ── Vault location management (Option A for all tiers, Option B LAN for Team+) ──
+ipcMain.handle('omnimorf:vault-get-location', async () => {
+    const s = readSettings();
+    const active = getVaultDir();
+    return {
+        active,
+        configured: s.vaultLocation || null,
+        isDefault: active === DEFAULT_VAULT_DIR,
+        isNetwork: isNetworkPath(active),
+        defaultPath: DEFAULT_VAULT_DIR,
+    };
+});
+
+ipcMain.handle('omnimorf:vault-pick-location', async () => {
+    if (!mainWindow) return { canceled: true };
+    const result = await dialog.showOpenDialog(mainWindow, {
+        title: 'Choose Vault Location',
+        properties: ['openDirectory', 'createDirectory', 'treatPackageAsDirectory'],
+    });
+    if (result.canceled || !result.filePaths[0]) return { canceled: true };
+    return { canceled: false, path: result.filePaths[0] };
+});
+
+ipcMain.handle('omnimorf:vault-set-location', async (event, { location, tier }) => {
+    if (!location || typeof location !== 'string') {
+        return { ok: false, error: 'No location provided' };
+    }
+
+    const isNetwork = isNetworkPath(location);
+    const allowNetwork = tier === 'team' || tier === 'enterprise';
+    if (isNetwork && !allowNetwork) {
+        return {
+            ok: false,
+            error: 'Network / LAN vault locations require the Team or Enterprise tier.',
+            upgrade: true,
+        };
+    }
+
+    // Verify we can actually write there before committing
+    try {
+        if (!fs.existsSync(location)) {
+            fs.mkdirSync(location, { recursive: true });
+        }
+        fs.accessSync(location, fs.constants.W_OK);
+    } catch (e) {
+        return { ok: false, error: 'That location is not writable: ' + (e.message || e) };
+    }
+
+    const s = readSettings();
+    s.vaultLocation = location;
+    writeSettings(s);
+    ensureVaultDir();
+    return { ok: true, active: getVaultDir(), isNetwork };
+});
+
+ipcMain.handle('omnimorf:vault-reset-location', async () => {
+    const s = readSettings();
+    delete s.vaultLocation;
+    writeSettings(s);
+    ensureVaultDir();
+    return { ok: true, active: getVaultDir() };
+});
+
+ipcMain.handle('omnimorf:vault-stats', async () => {
+    ensureVaultDir();
+    const index = JSON.parse(fs.readFileSync(getVaultIndexPath(), 'utf8'));
+    let originalTotal = 0;
+    let storedTotal = 0;
+    let dedupSavings = 0;
+    const seenHashes = new Set();
+    for (const e of index) {
+        const orig = e.originalSize || 0;
+        originalTotal += orig;
+        if (e.version === 2 && e.contentHash) {
+            if (seenHashes.has(e.contentHash)) {
+                dedupSavings += (e.compressedSize || orig);
+            } else {
+                seenHashes.add(e.contentHash);
+                storedTotal += (e.encryptedSize || e.compressedSize || orig);
+            }
+        } else {
+            storedTotal += (e.encryptedSize || orig);
+        }
+    }
+    return {
+        entryCount: index.length,
+        uniqueBlobs: seenHashes.size,
+        originalTotal,
+        storedTotal,
+        dedupSavings,
+        compressionRatio: originalTotal > 0 ? storedTotal / originalTotal : 1,
+        location: getVaultDir(),
+    };
+});
+
+// ── IPC: Update vault entry metadata (folder moves, rename) ──
+ipcMain.handle('omnimorf:vault-update-entry', async (event, { id, folder, name }) => {
+    ensureVaultDir();
+    const idxPath = getVaultIndexPath();
+    const index = JSON.parse(fs.readFileSync(idxPath, 'utf8'));
+    const entry = index.find(e => e.id === id);
+    if (!entry) return { ok: false, error: 'Entry not found' };
+    if (typeof folder === 'string') entry.folder = folder;
+    if (typeof name === 'string' && name.trim()) entry.name = name.trim();
+    fs.writeFileSync(idxPath, JSON.stringify(index, null, 2));
+    return { ok: true };
 });
 
 // ── IPC: Shred engine (secure delete) ────────────────────────

@@ -23,11 +23,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     saveConverted: (opts) => ipcRenderer.invoke('omnimorf:save-converted', opts),
     readConverted: (opts) => ipcRenderer.invoke('omnimorf:read-converted', opts),
 
-    // ── Vault (AES-256 encrypted storage) ────────────────────
+    // ── Vault (AES-256 encrypted, gzip-compressed, content-dedup storage) ──
     vaultSave:   (opts) => ipcRenderer.invoke('omnimorf:vault-save', opts),
     vaultLoad:   (opts) => ipcRenderer.invoke('omnimorf:vault-load', opts),
     vaultList:   ()     => ipcRenderer.invoke('omnimorf:vault-list'),
     vaultDelete: (opts) => ipcRenderer.invoke('omnimorf:vault-delete', opts),
+
+    // ── Vault Location (custom dir on all tiers; LAN/UNC gated to Team+) ──
+    vaultGetLocation:   ()      => ipcRenderer.invoke('omnimorf:vault-get-location'),
+    vaultPickLocation:  ()      => ipcRenderer.invoke('omnimorf:vault-pick-location'),
+    vaultSetLocation:   (opts)  => ipcRenderer.invoke('omnimorf:vault-set-location', opts),
+    vaultResetLocation: ()      => ipcRenderer.invoke('omnimorf:vault-reset-location'),
+    vaultStats:         ()      => ipcRenderer.invoke('omnimorf:vault-stats'),
+    vaultUpdateEntry:   (opts)  => ipcRenderer.invoke('omnimorf:vault-update-entry', opts),
 
     // ── Shred Engine (secure 3-pass delete) ──────────────────
     shredFile:   (opts) => ipcRenderer.invoke('omnimorf:shred-file', opts),
